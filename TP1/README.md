@@ -1,0 +1,107 @@
+TP1
+================
+Elio Campitelli
+4/17/2020
+
+``` r
+library(ggplot2)
+library(data.table)
+set.seed(42)
+```
+
+1.  
+<!-- end list -->
+
+``` r
+D <- function(n = 10, intervalo = c(0, 1), FUN = ~sin(2*pi*.x), ruido = 0.4) {
+  x <- runif(n, intervalo[1], intervalo[2])
+  FUN <- purrr::as_mapper(FUN)
+  real <- FUN(x)
+  obs <- real + rnorm(n, sd = ruido)
+  return(data.table::data.table(x, real, obs))
+}
+```
+
+2.  
+<!-- end list -->
+
+``` r
+regresion_poly <- function(obs, pred, orden = 1, lambda = 0) {
+  A <- cbind(1, poly(pred, degree = orden, raw = TRUE))
+  if (lambda != 0) {
+    L <- diag(1, nrow = ncol(A)) * lambda
+    w <- solve(t(A) %*% A + t(L) %*% L) %*% t(A) %*% obs
+  } else {
+    w <- qr.coef(qr(A), obs)
+  }
+  
+  class(w) <- c("regression_model")
+  attr(w, "orden") <- orden
+  attr(w, "pred") <- pred
+  return(w)
+}
+
+predict.regression_model <- function(object, newdata = NULL) {
+  if (is.null(newdata)) {
+    newdata <- attr(object, "pred", exact = TRUE)
+  }
+  
+  cbind(1, poly(newdata, degree = attr(object, "orden"), raw = TRUE)) %*% object
+}
+
+# Chequear que al menos el resultado sin regularizar coincide on el correcto.
+stopifnot({
+  d <- D()
+  w <- d[, regresion_poly(obs, x, orden = 7)]  
+  all.equal(sum(coef(lm(obs ~ poly(x, degree = 7, raw = TRUE), data = d)) - w), 0)
+})
+```
+
+``` r
+datos <- D(n = 50)
+
+ggplot(datos, aes(x, obs)) +
+  geom_point() +
+  geom_line(aes(y = real))
+```
+
+![](README_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
+
+``` r
+params <- CJ(lambda = 10^seq(-6, 2), orden = 1:10)
+
+rmse_cv <- function(obs, pred, lambda, orden, k_fold = 10) {
+  N <- length(obs)
+
+  grupos <- ggplot2::cut_number(seq_along(obs), k_fold)
+  data <- data.table(obs, pred)
+  
+  rmses <- vapply(seq_len(k_fold), function(k){
+    train_index <- grupos != levels(grupos)[k] 
+    train <- data[train_index == TRUE, ]
+    validation <- data[train_index == FALSE, ]
+    
+    model <- train[, regresion_poly(obs, pred, orden = orden, lambda = lambda)]
+    
+    validation[, sqrt(mean((obs - predict(model, newdata = pred))^2))  ]
+  }, numeric(1))
+  mean(rmses)
+}
+
+rmse <- params[, .(rmse = rmse_cv(datos$obs, datos$x, lambda = lambda, orden = orden)),
+               by = .(lambda, orden)]
+
+rmse[, lambda_log := log10(lambda)]
+rmse[, c("d_orden", "d_lambda") := metR::Derivate(rmse ~ orden + lambda_log, fill = TRUE)]
+
+ggplot(rmse, aes(orden, lambda_log)) +
+  geom_raster(aes(fill = rmse)) +
+  metR::geom_arrow(aes(mag = 1, 
+                       angle = atan2(-d_lambda, -d_orden)*180/pi), pivot = 0) +
+  metR::scale_mag(max_size = 0.5, guide = "none") +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_continuous(breaks = 1:10, expand = c(0, 0)) +
+  scale_fill_viridis_c(direction = -1) 
+```
+
+![](README_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->

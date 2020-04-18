@@ -2,7 +2,7 @@
 title: "TP1"
 author: "Elio Campitelli"
 date: "4/17/2020"
-output: html_document
+output: github_document
 ---
 
 ```{r}
