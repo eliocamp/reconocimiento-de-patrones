@@ -17,23 +17,29 @@ set.seed(42)
 Devuelve una tabla con los lugares `x`, los valores reales `real` y las obvercaciones `obs` (real + ruido). El argumento `ruido` es el desvio estándar del ruido.
 
 ```{r}
-D <- function(n = 10, intervalo = c(0, 1), FUN = ~sin(2*pi*.x), ruido = 0.2) {
-  x <- runif(n, intervalo[1], intervalo[2])
-  FUN <- purrr::as_mapper(FUN)
-  real <- FUN(x)
-  obs <- real + rnorm(n, sd = ruido)
-  return(data.table::data.table(x, real, obs))
+D <- function(n = 10, L = 1, intervalo = c(0, 1), FUN = ~sin(2*pi*.x), r = 0.3) {
+  datos <- lapply(seq_len(L), function(l) {
+    x <- runif(n, intervalo[1], intervalo[2])
+    # x <- seq(min(intervalo), max(intervalo), length.out = n)
+    FUN <- purrr::as_mapper(FUN)
+    real <- FUN(x)
+    t <- real + rnorm(n, sd = r)
+    return(data.table::data.table(x, t))
+  })
+  
+  data.table::rbindlist(datos, idcol = "l")
 }
 ```
 
 Ejemplo aleatorio
 
 ```{r, fig.cap = "sdfdsf"}
-D(n = 40) %>% 
-  ggplot(aes(x, obs)) +
+D(n = 40, L = 4) %>% 
+  ggplot(aes(x, t)) +
   stat_function(fun = ~sin(2*pi*.x)) +
   geom_point() +
-  scale_x_continuous(limits = c(0, 1))
+  scale_x_continuous(limits = c(0, 1)) +
+  facet_wrap(~l)
 ```
 
 
@@ -41,61 +47,100 @@ D(n = 40) %>%
 ## 2. Función para calcular la regresión
 
 ```{r}
-regresion_poly <- function(obs, x, orden = 1, lambda = 0) {
-  # Matriz de diseño
-  A <- cbind(1, poly(x, degree = orden, raw = TRUE))
+regresion_poly <- function(orden = 1, lambda = 0) {
+  force(orden)
+  force(lambda)
   
-  if (lambda != 0) {
-    L <- diag(1, nrow = ncol(A)) * lambda
-    w <- solve(t(A) %*% A + t(L) %*% L) %*% t(A) %*% obs    # Forma a lo bruto.
-  } else {
-    w <- qr.coef(qr(A), obs)   # Forma eficiente de calcular la regresion
+  function(formula, data = NULL, weights) {
+    datos <- model.frame(formula, data = data)
+    y <- datos[, 1]
+    x <- datos[, 2]
+    # browser()
+    Ws <- lapply(orden, function(o) {
+      # Matriz de diseños
+      if (o == 0) {
+        A <- cbind(rep(1, length(x)))
+      } else {
+        A <- cbind(1, poly(x, degree = o, raw = TRUE))  
+      }
+      
+      
+      if (lambda != 0) {
+        L <- diag(1, nrow = ncol(A)) * lambda
+        w <- solve(t(A) %*% A + L) %*% t(A) %*% y   # Forma a lo bruto.
+      } else {
+        w <- qr.coef(qr(A), y)   # Forma eficiente de calcular la regresion
+      }
+      
+      modelo <- list(orden = o, 
+                     w = w)
+      return(modelo)
+    })
+    
+    attr(Ws, "x") <- x
+    class(Ws) <- c("regression_models", class(Ws))
+    return(Ws)
   }
-  
-  # Detalles. 
-  class(w) <- c("regression_model")
-  attr(w, "orden") <- orden
-  attr(w, "x") <- x
-  return(w)
 }
 
-# Método para predecir nuevos valores usando la regresion.
-predict.regression_model <- function(object, newdata = NULL) {
+
+# Métodos para predecir nuevos valores usando la regresion.
+predict.regression_models <- function(object, newdata = NULL, which = 1) {
+  # browser()
   if (is.null(newdata)) {
     newdata <- attr(object, "x", exact = TRUE)
   }
   
-  cbind(1, poly(newdata, degree = attr(object, "orden"), raw = TRUE)) %*% object
+  model <- object[[which]]
+  
+  if (model$orden == 0) {
+    A <- cbind(rep(1, length(newdata))) 
+  } else {
+    A <- cbind(1, poly(newdata, degree = model$orden, raw = TRUE))
+  }
+  return((A %*% model$w)[, 1])
 }
 
-# Chequear que al menos el resultado sin regularizar coincide on el correcto.
-stopifnot({
-  d <- D()
-  w <- d[, regresion_poly(obs, x, orden = 7)]  
-  all.equal(sum(coef(lm(obs ~ poly(x, degree = 7, raw = TRUE), data = d)) - w), 0)
-})
-
-# Para ggplot2
-fortify.regression_model <- function(model, data, n = 40, ...) {
-  x <- seq(0, 1, length.out = n)
-  data.frame(x = x, 
-             y = predict(model, newdata = seq(0, 1, length.out = 40)))
+predictdf.regression_models <- function(object, xseq, se, level) {
+  fits <- lapply(seq_along(object), function(o) {
+    y <- predict(object, newdata = xseq, which = o)
+    return(data.frame(orden = object[[o]]$orden,
+                      x = xseq, 
+                      y = y))
+  })
+  
+  data <- do.call(rbind, fits)
+  data$orden <- factor(data$orden, ordered = TRUE)
+  return(data)
 }
-
 ```
 
-Ejemplo con ajuste de orden 3 en rojo y función real en negro.
+Ejemplo con ajuste de distintos órdenes y función real en negro.
 
 ```{r}
-datos <- D(n = 10)
+datos <- D(n = 10, L = 200)
 
-ggplot(datos, aes(x, obs)) +
-  geom_point() +
-  geom_line(aes(x, y), 
-            data = datos[, regresion_poly(obs, x, orden = 3)],
-            color = "red") +
-  stat_function(fun = ~sin(2*pi*.x)) +
-  scale_x_continuous(limits = c(0, 1))
+ggplot(datos[l %in% 1:4], aes(x, t)) +
+  stat_function(fun = ~sin(2*pi*.x), size = 1) +
+  geom_smooth(method = regresion_poly(0:10), 
+              aes(color = ..orden.., group = ..orden..),
+              size = 0.6, fullrange = TRUE, n = 120) +
+  geom_point()  +
+  scale_x_continuous(limits = c(0, 1)) +
+  coord_cartesian(ylim = c(-1, 1)) +
+  facet_wrap(~l)
+```
+
+
+```{r}
+datos[, pred := predict(regresion_poly(orden = 3, lambda = 1e-3)(t ~ x)), by = l] %>% 
+  .[, .(error_medio = sqrt(mean((t - pred)^2))), by = l] %>% 
+  ggplot(aes(error_medio)) +
+  geom_density() +
+  geom_label(data = ~.x[, .(mu = mean(error_medio), s = sd(error_medio))],
+             aes(label = glue::glue("Media = {signif(mu, 2)}\nSD = {signif(s, 2)}")),
+             x = 0.3, y = 3, hjust = 0) +
+  geom_rug()
 ```
 
 
@@ -105,26 +150,26 @@ ggplot(datos, aes(x, obs)) +
 Esta es la matriz de parámetros donde voy a buscar. M entre 1 y 10 y lambra entre 10^-6 y 1
 
 ```{r}
-params <- CJ(lambda = 10^seq(-7, 0, length.out = 15), orden = 1:10)
+params <- CJ(lambda = 10^seq(-6, 0, length.out = 15), orden = 0:10)
 ```
 
 Función para calcular el RMSE de cross-validación. Con k_fold = 10 se reduce a LOOCV
 
 ```{r}
-rmse_cv <- function(obs, pred, lambda, orden, k_fold = 10) {
-  N <- length(obs)
+rmse_cv <- function(y, x, lambda, orden, k_fold = 10) {
+  N <- length(y)
   
-  grupos <- ggplot2::cut_number(seq_along(obs), k_fold)
-  data <- data.table(obs, pred)
+  grupos <- ggplot2::cut_number(seq_along(y), k_fold)
+  data <- data.table(y, x)
   
   rmses <- vapply(seq_len(k_fold), function(k){
     train_index <- grupos != levels(grupos)[k] 
     train <- data[train_index == TRUE, ]
     validation <- data[train_index == FALSE, ]
     
-    model <- train[, regresion_poly(obs, pred, orden = orden, lambda = lambda)]
+    model <- train[, regresion_poly(orden = orden, lambda = lambda)(y ~ x)]
     
-    validation[, sqrt(mean((obs - predict(model, newdata = pred))^2))]
+    validation[, sqrt(mean((y - predict(model, newdata = x))^2))]
   }, numeric(1))
   mean(rmses)
 }
@@ -133,21 +178,36 @@ rmse_cv <- function(obs, pred, lambda, orden, k_fold = 10) {
 Corriendo todo. Para cada lambda y orden, calculo el RMSE. 
 
 ```{r}
-cv <- params[, .(rmse = rmse_cv(datos$obs, datos$x, lambda = lambda, orden = orden)),
-               by = .(lambda, orden)]
+cv <- params[, .(rmse = rmse_cv(datos[l == 1]$t, datos[l == 1]$x, lambda = lambda, orden = orden)),
+             by = .(lambda, orden)]
 
 ggplot(cv, aes(orden, lambda)) +
   geom_contour_filled(aes(z = log(rmse))) +
   scale_y_log10(expand = c(0, 0)) +
-  scale_x_continuous(breaks = 1:10, expand = c(0, 0)) +
-  scale_fill_viridis_d("log(rmse)", direction = -1, guide = guide_colorsteps(show.limits = TRUE))
+  scale_x_continuous(breaks = unique(cv$orden), expand = c(0, 0)) +
+  scale_fill_viridis_d("log(rmse)", direction = -1,
+                       guide = guide_colorsteps(show.limits = TRUE))
 ```
 
 
 ¿Cuál es la "mejor" combinación de hiperparámetros?
 
 ```{r}
-cv[which.min(rmse)]
+(mejor <- cv[which.min(rmse)])
 ```
 
+
+```{r}
+modelo <- datos[l == 1, regresion_poly(orden = mejor$orden, lambda = mejor$lambda)(t ~ x)]
+
+datos[l != 1] %>% 
+  .[, pred := predict(modelo, newdata = x), by = l] %>% 
+  .[, .(error_medio = sqrt(mean((t - pred)^2))), by = l] %>% 
+  ggplot(aes(error_medio)) +
+  geom_density() +
+  geom_label(data = ~.x[, .(mu = mean(error_medio), s = sd(error_medio))],
+             aes(label = glue::glue("Media = {signif(mu, 2)}\nSD = {signif(s, 2)}")),
+             x = 0.4, y = 2, hjust = 0) +
+  geom_rug()
+```
 
