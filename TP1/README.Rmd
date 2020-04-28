@@ -1,29 +1,59 @@
 ---
-title: "TP1"
+title: "TP1 - Reconocimiento de Patrones"
 author: "Elio Campitelli"
 date: "4/17/2020"
-output: github_document
+output: 
+  bookdown::tufte_handout2: 
+    toc: FALSE
 ---
 
-```{r}
+```{r setup, include = FALSE}
 library(ggplot2)
 library(data.table)
 library(magrittr)
+library(patchwork)
+theme_set(ggthemes::theme_tufte())
+knitr::opts_chunk$set(tidy = FALSE, message = FALSE)
+
+label_null <- as_labeller(function(x) "")
+
 set.seed(42)
 ```
 
-## 1. Función que genera un set de datos.
+# Generar set de datos
 
-Devuelve una tabla con los lugares `x`, los valores reales `real` y las obvercaciones `obs` (real + ruido). El argumento `ruido` es el desvio estándar del ruido.
+Para cada x, los datos a generear siguen una distribución $p(x, y) = \mathcal{N}(\mu = \sin(2\pi x), \sigma = 0.3)$. Esta función de densidad de probabilidad conjunta se muestra en la Figura \@ref(fig:densidad). El mejor ajuste en el sentido de cuadrados mínimos está dado por $\mathrm{h}(x) = \mathbb{E}(y|x) =\sin(2\pi x)$. Ambas funciones ($p(x, y)$ y $\mathbb{E}(y|x)$) se grafican en la Figura \@ref(fig:densidad).
 
 ```{r}
-D <- function(n = 10, L = 1, intervalo = c(0, 1), FUN = ~sin(2*pi*.x), r = 0.3) {
+densidad <- function(x = seq(0, 1, length.out = 40), 
+                     y = seq(-2, 2, length.out = 40), 
+                     FUN = ~sin(2*pi*.x), sigma = 0.3) {
+  FUN <-  purrr::as_mapper(FUN)
+  grid <- data.table::CJ(x, y)
+  grid[, d := dnorm(y, mean = FUN(x), sd = sigma), by = x]
+  grid
+}
+
+```
+
+```{r densidad, fig.cap = "Densidad de probabilidad conjunta $p(x, y) = \\mathcal{N}(\\sin(2\\pi x), 0.3)$. En negro, la línea $\\mathbb{E}(y|x)$."}
+densidad() %>% 
+  ggplot(aes(x, y)) +
+  geom_contour_filled(aes(z = d), bins = 9) +
+  stat_function(fun = ~ sin(2*pi*.x)) +
+  scale_fill_viridis_d(guide = "none")
+```
+
+
+La función `D`^[Definida en el [Apéndice](#def-d)] devuelve `L` sets de `n` datos. Éstos corresponden a la función `FUN` (default: $\sin(2\pi x)$)) evaluada en `n` puntos elegidos a partir de una distribución uniforme en el intervalo `intervalo` (default: $(0, 1)$) a la que se le suma un ruido gausiano con media 0 y desvío `sigma` (default: $0.3$).
+
+```{r define_d, include=FALSE}
+D <- function(n = 10, L = 1, intervalo = c(0, 1), FUN = ~sin(2*pi*.x), sigma = 0.3) {
   datos <- lapply(seq_len(L), function(l) {
     x <- runif(n, intervalo[1], intervalo[2])
-    # x <- seq(min(intervalo), max(intervalo), length.out = n)
     FUN <- purrr::as_mapper(FUN)
     real <- FUN(x)
-    t <- real + rnorm(n, sd = r)
+    t <- real + rnorm(n, sd = sigma)
     return(data.table::data.table(x, t))
   })
   
@@ -31,48 +61,55 @@ D <- function(n = 10, L = 1, intervalo = c(0, 1), FUN = ~sin(2*pi*.x), r = 0.3) 
 }
 ```
 
-Ejemplo aleatorio
 
-```{r, fig.cap = "sdfdsf"}
-D(n = 40, L = 4) %>% 
+
+```{r, fig.cap = "Cuatro ejemplos de conjuntos de datos generados por la función `D` con `n = 40`. En línea negra, la función $t = \\sin(2\\pi x)$"}
+datos <- D(n = 40, L = 4)
+datos %>% 
   ggplot(aes(x, t)) +
   stat_function(fun = ~sin(2*pi*.x)) +
-  geom_point() +
+  geom_point(size = 0.4) +
   scale_x_continuous(limits = c(0, 1)) +
-  facet_wrap(~l)
+  facet_wrap(~l, labeller = label_null)
 ```
 
 
 
-## 2. Función para calcular la regresión
+## Función para calcular la regresión
 
-```{r}
+`regresion_poly`^[Definida en el [Apéndice](#def-regr)] tiene argumentos `orden` y `lambda` y devuelve una función que realiza el ajuste polinomial correspondiente^[Esto es una complicación extra pero vale la pena para poder usar la función como argumento de `method` en `geom_smooth()` como se ve en la figura siguiente.]. Los métodos `predictdf` y `predict`^[Definidos en el [Apéndice](#def-regr)] aplican el ajuste a nuevos datos.
+
+```{r define_regr, include = FALSE}
 regresion_poly <- function(orden = 1, lambda = 0) {
   force(orden)
   force(lambda)
+  
+  modelos <- data.table::CJ(orden, lambda)
   
   function(formula, data = NULL, weights) {
     datos <- model.frame(formula, data = data)
     y <- datos[, 1]
     x <- datos[, 2]
-    # browser()
-    Ws <- lapply(orden, function(o) {
-      # Matriz de diseños
-      if (o == 0) {
+    Ws <- lapply(seq_len(nrow(modelos)), function(i) {
+      orden <- modelos$orden[i]
+      lambda <- modelos$lambda[i]
+      # Matriz de diseño
+      
+      if (orden == 0) {
         A <- cbind(rep(1, length(x)))
       } else {
-        A <- cbind(1, poly(x, degree = o, raw = TRUE))  
+        A <- cbind(1, poly(x, degree = orden, raw = TRUE))  
       }
-      
-      
+
       if (lambda != 0) {
         L <- diag(1, nrow = ncol(A)) * lambda
         w <- solve(t(A) %*% A + L) %*% t(A) %*% y   # Forma a lo bruto.
       } else {
-        w <- qr.coef(qr(A), y)   # Forma eficiente de calcular la regresion
+        w <- qr.coef(qr(A), y)   # Forma eficiente de invertir la matriz
       }
       
-      modelo <- list(orden = o, 
+      modelo <- list(orden = orden,
+                     lambda = lambda,
                      w = w)
       return(modelo)
     })
@@ -82,8 +119,10 @@ regresion_poly <- function(orden = 1, lambda = 0) {
     return(Ws)
   }
 }
+```
 
 
+```{r define_methods, include = FALSE}
 # Métodos para predecir nuevos valores usando la regresion.
 predict.regression_models <- function(object, newdata = NULL, which = 1) {
   # browser()
@@ -105,6 +144,7 @@ predictdf.regression_models <- function(object, xseq, se, level) {
   fits <- lapply(seq_along(object), function(o) {
     y <- predict(object, newdata = xseq, which = o)
     return(data.frame(orden = object[[o]]$orden,
+                      lambda = object[[o]]$lambda,
                       x = xseq, 
                       y = y))
   })
@@ -115,37 +155,59 @@ predictdf.regression_models <- function(object, xseq, se, level) {
 }
 ```
 
-Ejemplo con ajuste de distintos órdenes y función real en negro.
+La Figura \@ref(fig:ajustes-orden) muestra el efecto de cambiar el orden del polinomio para un set de datos de `n = 10`. Un polinomio de orden cero es una constante, por lo que el valor predicho por ese ajuste coincide con el promedio muestral. Polinomio de orden 1 agrega una tendencia, y órdenes mayores van aumentando los grados de libertad del modelo. Para órdenes altos (cercanos a la cantidad de datos usados para realizar el ajuste), el modelo es lo suficientemente complejo para predecir los datos observados con gran exactitud, pero pierde poder de generalización para datos no observados.
 
-```{r}
-datos <- D(n = 10, L = 200)
+```{r ajustes-orden, fig.cap = "Ajustes polinomiales con distintos órdenes y lambda = 0 para 1 ejemplo. La línea negra representa la función real. Al aumentar el grado del polinomio, el ajuste se acerca más a los puntos observados pero oscila alocadamente lejos de ellos."}
+datos <- D(n = 10, L = 1)
 
-ggplot(datos[l %in% 1:4], aes(x, t)) +
-  stat_function(fun = ~sin(2*pi*.x), size = 1) +
-  geom_smooth(method = regresion_poly(0:10), 
+ggplot(datos, aes(x, t)) +
+  stat_function(fun = ~sin(2*pi*.x)) +
+  geom_smooth(method = regresion_poly(orden = c(0:3, 6, 8)), 
               aes(color = ..orden.., group = ..orden..),
-              size = 0.6, fullrange = TRUE, n = 120) +
-  geom_point()  +
+              size = 0.4, fullrange = TRUE, n = 120) +
+  geom_point(size = 0.4)  +
   scale_x_continuous(limits = c(0, 1)) +
-  coord_cartesian(ylim = c(-1, 1)) +
-  facet_wrap(~l)
+  coord_cartesian(ylim = c(-2, 2)) +
+  facet_wrap(~l, labeller = label_null)
 ```
 
+En cambio, la Figura \@ref(fig:ajuste-lambda) muestra el efecto de aumentar el factor de regularización lambda. Al aumentar, aumenta la penalización de coeficientes altos y el modelo deja de ajustar tan bien a los datos observados pero mejora la generalización. 
 
-```{r}
+```{r ajustes-lambda, fig.cap = "Igual que la figura anterior, pero con orden fijo = 8 y lambda variable. Al aumentar el factor de regularización, el modelo se simplifica. Aumenta la diferencia con los datos usados para el ajuste, pero mejora la generalización."}
+ggplot(datos, aes(x, t)) +
+  stat_function(fun = ~sin(2*pi*.x)) +
+  geom_smooth(method = regresion_poly(orden = 8, lambda = c(0, 10^seq(-8, -1, length.out = 5))), 
+              aes(color = factor(log10(..lambda..), ordered = TRUE),
+                  group = log10(..lambda..)),
+              size = 0.4, fullrange = TRUE, n = 120) +
+  geom_point(size = 0.4)  +
+  scale_x_continuous(limits = c(0, 1)) +
+  scale_color_viridis_d("log(lambda)", labels = function(x) signif(as.numeric(x), 2)) +
+  coord_cartesian(ylim = c(-2, 2)) +
+  facet_wrap(~l, labeller = label_null) 
+```
+El error cuadrático medio de entrenamiento se calcula como la diferencia cuadrática media entre los valores observados y los predichos por el modelo. En la Figura \@ref(fig:rmse-sd) se muestra un histograma de la raiz cuadrada del error cuadrático medio^[RMSE: Root Mean Square Error] para 200 muestras de `n = 10` haciendo un ajuste con `orden = 3` y `lambda = 1e-3`. En el recuadro, el valor medio del RMSE y su desvío estándar.
+
+
+```{r rmse-sd, fig.cap = "Histograma de la raiz del error cuadrático medio computado para 200 muestras de `n = 10`."}
+datos <- D(n = 10, L = 200)
 datos[, pred := predict(regresion_poly(orden = 3, lambda = 1e-3)(t ~ x)), by = l] %>% 
   .[, .(error_medio = sqrt(mean((t - pred)^2))), by = l] %>% 
   ggplot(aes(error_medio)) +
-  geom_density() +
+  geom_histogram(binwidth = 0.025, fill = NA, color = "black") +
   geom_label(data = ~.x[, .(mu = mean(error_medio), s = sd(error_medio))],
              aes(label = glue::glue("Media = {signif(mu, 2)}\nSD = {signif(s, 2)}")),
-             x = 0.3, y = 3, hjust = 0) +
+             x = 0.35, y = 30, hjust = 0) +
+  scale_x_continuous("RSME") +
+  scale_y_continuous(NULL) +
   geom_rug()
 ```
 
 
 
-## 3. Determinando M y lambda
+## Determinando M y lambda
+
+
 
 Esta es la matriz de parámetros donde voy a buscar. M entre 1 y 10 y lambra entre 10^-6 y 1
 
@@ -155,7 +217,7 @@ params <- CJ(lambda = 10^seq(-6, 0, length.out = 15), orden = 0:10)
 
 Función para calcular el RMSE de cross-validación. Con k_fold = 10 se reduce a LOOCV
 
-```{r}
+```{r deinfe_cv, include = FALSE}
 rmse_cv <- function(y, x, lambda, orden, k_fold = 10) {
   N <- length(y)
   
@@ -209,5 +271,31 @@ datos[l != 1] %>%
              aes(label = glue::glue("Media = {signif(mu, 2)}\nSD = {signif(s, 2)}")),
              x = 0.4, y = 2, hjust = 0) +
   geom_rug()
+```
+
+
+# Apéndice
+
+## Paquetes y setup
+
+```{r setup}
+```
+
+## Definición de D {#def-d}
+
+```{r define_d}
+```
+
+## Definición de regresion_poly y métodos {#def-regr}
+
+```{r define_regr}
+```
+
+```{r define_methods}
+```
+
+## Definición de rmse_cv
+
+```{r define_cv}
 ```
 

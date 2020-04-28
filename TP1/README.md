@@ -7,24 +7,28 @@ Elio Campitelli
 library(ggplot2)
 library(data.table)
 library(magrittr)
+theme_set(theme_minimal(base_size= 16, base_family = hrbrthemes::font_rc))
+
+label_null <- as_labeller(function(x) "")
+
 set.seed(42)
 ```
 
 ## 1\. Función que genera un set de datos.
 
-Devuelve una tabla con los lugares `x`, los valores reales `real` y las
-obvercaciones `obs` (real + ruido). El argumento `ruido` es el desvio
-estándar del
-ruido.
+La función `D()` devuelve `L` sets de `n` datos. Éstos correponden a la
+función `FUN` evaluada en `n` puntos elegidos a partir de una
+distribución uniforme en el intervalo `intervalo` a la que se le suma
+un ruido gausiano con media 0 y desvío
+`sigma`.
 
 ``` r
-D <- function(n = 10, L = 1, intervalo = c(0, 1), FUN = ~sin(2*pi*.x), r = 0.3) {
+D <- function(n = 10, L = 1, intervalo = c(0, 1), FUN = ~sin(2*pi*.x), sigma = 0.3) {
   datos <- lapply(seq_len(L), function(l) {
     x <- runif(n, intervalo[1], intervalo[2])
-    # x <- seq(min(intervalo), max(intervalo), length.out = n)
     FUN <- purrr::as_mapper(FUN)
     real <- FUN(x)
-    t <- real + rnorm(n, sd = r)
+    t <- real + rnorm(n, sd = sigma)
     return(data.table::data.table(x, t))
   })
   
@@ -35,17 +39,24 @@ D <- function(n = 10, L = 1, intervalo = c(0, 1), FUN = ~sin(2*pi*.x), r = 0.3) 
 Ejemplo aleatorio
 
 ``` r
-D(n = 40, L = 4) %>% 
+datos <- D(n = 40, L = 4)
+datos %>% 
   ggplot(aes(x, t)) +
   stat_function(fun = ~sin(2*pi*.x)) +
   geom_point() +
   scale_x_continuous(limits = c(0, 1)) +
-  facet_wrap(~l)
+  facet_wrap(~l, labeller = label_null)
 ```
 
-![sdfdsf](README_files/figure-gfm/unnamed-chunk-3-1.png)
+![Cuatro ejemplos de conjuntos de datos generados por la función`D()`.
+La línea negra representa la función
+real.](README_files/figure-gfm/unnamed-chunk-3-1.png)
 
 ## 2\. Función para calcular la regresión
+
+`regresion_poly` tiene argumentos `orden` y `lambda` y devuelve una
+función que realiza el ajuste polinomial correspondiente. Los métodos
+`predictdf` y `predict` aplican el ajuste a nuevod datos.
 
 ``` r
 regresion_poly <- function(orden = 1, lambda = 0) {
@@ -116,27 +127,28 @@ predictdf.regression_models <- function(object, xseq, se, level) {
 }
 ```
 
-Ejemplo con ajuste de distintos órdenes y función real en negro.
-
 ``` r
 datos <- D(n = 10, L = 200)
 
 ggplot(datos[l %in% 1:4], aes(x, t)) +
   stat_function(fun = ~sin(2*pi*.x), size = 1) +
-  geom_smooth(method = regresion_poly(0:10), 
+  geom_smooth(method = regresion_poly(c(0:3, 6, 8)), 
               aes(color = ..orden.., group = ..orden..),
               size = 0.6, fullrange = TRUE, n = 120) +
   geom_point()  +
   scale_x_continuous(limits = c(0, 1)) +
-  coord_cartesian(ylim = c(-1, 1)) +
-  facet_wrap(~l)
+  coord_cartesian(ylim = c(-2, 2)) +
+  facet_wrap(~l, labeller = label_null)
 ```
 
     ## `geom_smooth()` using formula 'y ~ x'
 
-    ## Warning: Removed 720 rows containing missing values (geom_smooth).
+![Ajustes polinomiales con distintos órdenes y lambda = 0 para 4
+ejemplos. La línea negra representa la función
+real.](README_files/figure-gfm/ajustes-1.png)
 
-![](README_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+En la Figura~@ref{fig:ajustes}
+blababal
 
 ``` r
 datos[, pred := predict(regresion_poly(orden = 3, lambda = 1e-3)(t ~ x)), by = l] %>% 
@@ -149,7 +161,7 @@ datos[, pred := predict(regresion_poly(orden = 3, lambda = 1e-3)(t ~ x)), by = l
   geom_rug()
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
 
 ## 3\. Determinando M y lambda
 
@@ -198,7 +210,7 @@ ggplot(cv, aes(orden, lambda)) +
                        guide = guide_colorsteps(show.limits = TRUE))
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
 
 ¿Cuál es la “mejor” combinación de hiperparámetros?
 
@@ -223,4 +235,4 @@ datos[l != 1] %>%
   geom_rug()
 ```
 
-![](README_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+![](README_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
