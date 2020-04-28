@@ -5,6 +5,7 @@ date: "4/17/2020"
 output: 
   bookdown::tufte_handout2: 
     toc: FALSE
+    highlight: default
 ---
 
 ```{r setup, include = FALSE}
@@ -31,7 +32,7 @@ densidad <- function(x = seq(0, 1, length.out = 40),
   FUN <-  purrr::as_mapper(FUN)
   grid <- data.table::CJ(x, y)
   grid[, d := dnorm(y, mean = FUN(x), sd = sigma), by = x]
-  grid
+  return(grid)
 }
 
 ```
@@ -57,7 +58,7 @@ D <- function(n = 10, L = 1, intervalo = c(0, 1), FUN = ~sin(2*pi*.x), sigma = 0
     return(data.table::data.table(x, t))
   })
   
-  data.table::rbindlist(datos, idcol = "l")
+  return(data.table::rbindlist(datos, idcol = "l"))
 }
 ```
 
@@ -100,7 +101,7 @@ regresion_poly <- function(orden = 1, lambda = 0) {
       } else {
         A <- cbind(1, poly(x, degree = orden, raw = TRUE))  
       }
-
+      
       if (lambda != 0) {
         L <- diag(1, nrow = ncol(A)) * lambda
         w <- solve(t(A) %*% A + L) %*% t(A) %*% y   # Forma a lo bruto.
@@ -165,7 +166,7 @@ ggplot(datos, aes(x, t)) +
   geom_smooth(method = regresion_poly(orden = c(0:3, 6, 8)), 
               aes(color = ..orden.., group = ..orden..),
               size = 0.4, fullrange = TRUE, n = 120) +
-  geom_point(size = 0.4)  +
+  geom_point()  +
   scale_x_continuous(limits = c(0, 1)) +
   coord_cartesian(ylim = c(-2, 2)) +
   facet_wrap(~l, labeller = label_null)
@@ -180,12 +181,13 @@ ggplot(datos, aes(x, t)) +
               aes(color = factor(log10(..lambda..), ordered = TRUE),
                   group = log10(..lambda..)),
               size = 0.4, fullrange = TRUE, n = 120) +
-  geom_point(size = 0.4)  +
+  geom_point()  +
   scale_x_continuous(limits = c(0, 1)) +
   scale_color_viridis_d("log(lambda)", labels = function(x) signif(as.numeric(x), 2)) +
   coord_cartesian(ylim = c(-2, 2)) +
   facet_wrap(~l, labeller = label_null) 
 ```
+
 El error cuadrático medio de entrenamiento se calcula como la diferencia cuadrática media entre los valores observados y los predichos por el modelo. En la Figura \@ref(fig:rmse-sd) se muestra un histograma de la raiz cuadrada del error cuadrático medio^[RMSE: Root Mean Square Error] para 200 muestras de `n = 10` haciendo un ajuste con `orden = 3` y `lambda = 1e-3`. En el recuadro, el valor medio del RMSE y su desvío estándar.
 
 
@@ -203,44 +205,42 @@ datos[, pred := predict(regresion_poly(orden = 3, lambda = 1e-3)(t ~ x)), by = l
   geom_rug()
 ```
 
-
-
 ## Determinando M y lambda
 
+Para elegir el orden y el lambda se puede usar validación cruzada. Para cada combinación de los hiperpaŕametros se separa los datos en un conjunto de _entrenamiento_ que se usa para ajustar un modelo y uno de _validación_, que se usa para evaluar el error del modelo a datos nuevos. Se busca la combinación que minimice el error de validación y finalmente se estima el error esperado con el conjunto de _test_.
 
-
-Esta es la matriz de parámetros donde voy a buscar. M entre 1 y 10 y lambra entre 10^-6 y 1
+Esta es la matriz de parámetros donde voy a buscar. Lambda entre 10^-10 y 1, y el orden del polinomio entre 0 y 11
 
 ```{r}
-params <- CJ(lambda = 10^seq(-6, 0, length.out = 15), orden = 0:10)
+params <- CJ(lambda = 10^seq(-10, 0, length.out = 15), orden = 0:15)
 ```
 
-Función para calcular el RMSE de cross-validación. Con k_fold = 10 se reduce a LOOCV
+Defino una función para calcular el RSME de validación cruzada^[Definida en el [Apéndice](#def-cv)]. Ésta toma un set de datos, una formula que determina el modelo y una función de regresión (lo que devuelve `regresion_poly()`). Tiene un argumento `k_fold` (default: 10) que controla la cantidad de cachos. Si  `k_fold = n`, el algoritmo se reduce a LOOCV^[Leave One Out Cross-Validation. Es decir, que se ajusta el modelo usando todos los datos menos uno.]
 
-```{r deinfe_cv, include = FALSE}
-rmse_cv <- function(y, x, lambda, orden, k_fold = 10) {
-  N <- length(y)
+
+```{r define_cv, include = FALSE}
+rmse_cv <- function(formula, datos, fit_fun, k_fold = 10) {
+  N <- nrow(datos)
   
-  grupos <- ggplot2::cut_number(seq_along(y), k_fold)
-  data <- data.table(y, x)
+  grupos <- ggplot2::cut_number(seq_len(N), k_fold)
   
   rmses <- vapply(seq_len(k_fold), function(k){
     train_index <- grupos != levels(grupos)[k] 
-    train <- data[train_index == TRUE, ]
-    validation <- data[train_index == FALSE, ]
-    
-    model <- train[, regresion_poly(orden = orden, lambda = lambda)(y ~ x)]
-    
-    validation[, sqrt(mean((y - predict(model, newdata = x))^2))]
+    train <- datos[train_index == TRUE, ]
+    validation <- datos[train_index == FALSE, ]
+    model <- fit_fun(formula, data = train)
+    validation[, sqrt(mean((t - predict(model, newdata = x))^2))]
   }, numeric(1))
-  mean(rmses)
+  return(mean(rmses))
 }
 ```
 
 Corriendo todo. Para cada lambda y orden, calculo el RMSE. 
 
 ```{r}
-cv <- params[, .(rmse = rmse_cv(datos[l == 1]$t, datos[l == 1]$x, lambda = lambda, orden = orden)),
+cv <- params[, .(rmse = rmse_cv(t ~ x,
+                                datos = datos[l == 1],
+                                fit_fun = regresion_poly(orden = orden, lambda = lambda))),
              by = .(lambda, orden)]
 
 ggplot(cv, aes(orden, lambda)) +
@@ -254,8 +254,12 @@ ggplot(cv, aes(orden, lambda)) +
 
 ¿Cuál es la "mejor" combinación de hiperparámetros?
 
-```{r}
-(mejor <- cv[which.min(rmse)])
+```{r echo=FALSE}
+mejor <- cv[which.min(rmse)]
+cv[order(rmse)] %>% 
+  .[1:5] %>%
+  knitr::kable(format = "latex", booktabs = TRUE, 
+               caption = "Combinación de valores de lambda y orden que minimizan el RMSE de validación cruzada")
 ```
 
 
@@ -266,16 +270,18 @@ datos[l != 1] %>%
   .[, pred := predict(modelo, newdata = x), by = l] %>% 
   .[, .(error_medio = sqrt(mean((t - pred)^2))), by = l] %>% 
   ggplot(aes(error_medio)) +
-  geom_density() +
+  geom_histogram(binwidth = 0.025, fill = NA, color = "black") +
   geom_label(data = ~.x[, .(mu = mean(error_medio), s = sd(error_medio))],
              aes(label = glue::glue("Media = {signif(mu, 2)}\nSD = {signif(s, 2)}")),
-             x = 0.4, y = 2, hjust = 0) +
+             x = 0.6, y = 15, hjust = 0) +
+  scale_x_continuous("RSME") +
+  scale_y_continuous(NULL) +
   geom_rug()
 ```
 
 
 # Apéndice
-
+ 
 ## Paquetes y setup
 
 ```{r setup}
@@ -294,7 +300,7 @@ datos[l != 1] %>%
 ```{r define_methods}
 ```
 
-## Definición de rmse_cv
+## Definición de rmse_cv {#def-cv}
 
 ```{r define_cv}
 ```
