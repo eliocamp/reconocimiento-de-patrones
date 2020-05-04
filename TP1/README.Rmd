@@ -7,6 +7,8 @@ output:
     toc: FALSE
     keep_tex: TRUE
     highlight: default
+  bookdown::github_document2:
+    default
 ---
 
 ```{r setup, include = FALSE}
