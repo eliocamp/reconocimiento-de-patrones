@@ -5,6 +5,7 @@ date: "4/17/2020"
 output: 
   bookdown::tufte_handout2: 
     toc: FALSE
+    keep_tex: TRUE
     highlight: default
 ---
 
@@ -14,7 +15,7 @@ library(data.table)
 library(magrittr)
 library(patchwork)
 theme_set(ggthemes::theme_tufte())
-knitr::opts_chunk$set(tidy = FALSE, message = FALSE)
+knitr::opts_chunk$set(tidy = FALSE, message = FALSE, cache = TRUE, cache.extra = 1, echo = FALSE)
 
 label_null <- as_labeller(function(x) "")
 
@@ -34,7 +35,6 @@ densidad <- function(x = seq(0, 1, length.out = 40),
   grid[, d := dnorm(y, mean = FUN(x), sd = sigma), by = x]
   return(grid)
 }
-
 ```
 
 ```{r densidad, fig.cap = "Densidad de probabilidad conjunta $p(x, y) = \\mathcal{N}(\\sin(2\\pi x), 0.3)$. En negro, la línea $\\mathbb{E}(y|x)$."}
@@ -42,11 +42,13 @@ densidad() %>%
   ggplot(aes(x, y)) +
   geom_contour_filled(aes(z = d), bins = 9) +
   stat_function(fun = ~ sin(2*pi*.x)) +
+  scale_x_continuous(expand = c(0.01, 0)) +
+  scale_y_continuous(expand = c(0.01, 0)) +
   scale_fill_viridis_d(guide = "none")
 ```
 
 
-La función `D`^[Definida en el [Apéndice](#def-d)] devuelve `L` sets de `n` datos. Éstos corresponden a la función `FUN` (default: $\sin(2\pi x)$)) evaluada en `n` puntos elegidos a partir de una distribución uniforme en el intervalo `intervalo` (default: $(0, 1)$) a la que se le suma un ruido gausiano con media 0 y desvío `sigma` (default: $0.3$).
+La función `D`^[Definida en el [Apéndice](#def-d).] devuelve `L` sets de `n` datos. Éstos corresponden a la función `FUN` (default: $\sin(2\pi x)$)) evaluada en `n` puntos elegidos a partir de una distribución uniforme en el intervalo `intervalo` (default: $(0, 1)$) a la que se le suma un ruido gausiano con media 0 y desvío `sigma` (default: $0.3$).
 
 ```{r define_d, include=FALSE}
 D <- function(n = 10, L = 1, intervalo = c(0, 1), FUN = ~sin(2*pi*.x), sigma = 0.3) {
@@ -78,7 +80,7 @@ datos %>%
 
 ## Función para calcular la regresión
 
-`regresion_poly`^[Definida en el [Apéndice](#def-regr)] tiene argumentos `orden` y `lambda` y devuelve una función que realiza el ajuste polinomial correspondiente^[Esto es una complicación extra pero vale la pena para poder usar la función como argumento de `method` en `geom_smooth()` como se ve en la figura siguiente.]. Los métodos `predictdf` y `predict`^[Definidos en el [Apéndice](#def-regr)] aplican el ajuste a nuevos datos.
+`regresion_poly`^[Definida en el [Apéndice](#def-regr).] tiene argumentos `orden` y `lambda` y devuelve una función que realiza el ajuste polinomial correspondiente^[Esto es una complicación extra pero vale la pena para poder usar la función como argumento de `method` en `geom_smooth()` como se ve en la figura siguiente.]. Los métodos `predictdf` y `predict`^[Definidos en el [Apéndice](#def-regr).] aplican el ajuste a nuevos datos.
 
 ```{r define_regr, include = FALSE}
 regresion_poly <- function(orden = 1, lambda = 0) {
@@ -172,7 +174,7 @@ ggplot(datos, aes(x, t)) +
   facet_wrap(~l, labeller = label_null)
 ```
 
-En cambio, la Figura \@ref(fig:ajuste-lambda) muestra el efecto de aumentar el factor de regularización lambda. Al aumentar, aumenta la penalización de coeficientes altos y el modelo deja de ajustar tan bien a los datos observados pero mejora la generalización. 
+En cambio, la Figura \@ref(fig:ajustes-lambda) muestra el efecto de aumentar el factor de regularización lambda. Al aumentar, aumenta la penalización de coeficientes altos y el modelo deja de ajustar tan bien a los datos observados pero mejora la generalización. 
 
 ```{r ajustes-lambda, fig.cap = "Igual que la figura anterior, pero con orden fijo = 8 y lambda variable. Al aumentar el factor de regularización, el modelo se simplifica. Aumenta la diferencia con los datos usados para el ajuste, pero mejora la generalización."}
 ggplot(datos, aes(x, t)) +
@@ -193,13 +195,13 @@ El error cuadrático medio de entrenamiento se calcula como la diferencia cuadr�
 
 ```{r rmse-sd, fig.cap = "Histograma de la raiz del error cuadrático medio computado para 200 muestras de `n = 10`."}
 datos <- D(n = 10, L = 200)
-datos[, pred := predict(regresion_poly(orden = 3, lambda = 1e-3)(t ~ x)), by = l] %>% 
+datos[, pred := predict(regresion_poly(orden = 6, lambda = 1e-1)(t ~ x)), by = l] %>% 
   .[, .(error_medio = sqrt(mean((t - pred)^2))), by = l] %>% 
   ggplot(aes(error_medio)) +
   geom_histogram(binwidth = 0.025, fill = NA, color = "black") +
   geom_label(data = ~.x[, .(mu = mean(error_medio), s = sd(error_medio))],
              aes(label = glue::glue("Media = {signif(mu, 2)}\nSD = {signif(s, 2)}")),
-             x = 0.35, y = 30, hjust = 0) +
+             x = 0.23, y = 20, hjust = 0) +
   scale_x_continuous("RSME") +
   scale_y_continuous(NULL) +
   geom_rug()
@@ -212,14 +214,14 @@ Para elegir el orden y el lambda se puede usar validación cruzada. Para cada co
 Esta es la matriz de parámetros donde voy a buscar. Lambda entre 10^-10 y 1, y el orden del polinomio entre 0 y 11
 
 ```{r}
-params <- CJ(lambda = 10^seq(-10, 0, length.out = 15), orden = 0:15)
+params <- CJ(lambda = 10^seq(-7, 0), orden = 2:12)
 ```
 
-Defino una función para calcular el RSME de validación cruzada^[Definida en el [Apéndice](#def-cv)]. Ésta toma un set de datos, una formula que determina el modelo y una función de regresión (lo que devuelve `regresion_poly()`). Tiene un argumento `k_fold` (default: 10) que controla la cantidad de cachos. Si  `k_fold = n`, el algoritmo se reduce a LOOCV^[Leave One Out Cross-Validation. Es decir, que se ajusta el modelo usando todos los datos menos uno.]
+Defino una función para calcular el RSME de validación cruzada^[Definida en el [Apéndice](#def-cv).]. Ésta toma un set de datos, una formula que determina el modelo y una función de regresión (lo que devuelve `regresion_poly()`). Tiene un argumento `k_fold` (default: 5) que controla la cantidad de cachos. Si  `k_fold = n`, el algoritmo se reduce a LOOCV^[Leave One Out Cross-Validation. Es decir, que se ajusta el modelo usando todos los datos menos uno.]
 
 
 ```{r define_cv, include = FALSE}
-rmse_cv <- function(formula, datos, fit_fun, k_fold = 10) {
+rmse_cv <- function(formula, datos, fit_fun, k_fold = 5) {
   N <- nrow(datos)
   
   grupos <- ggplot2::cut_number(seq_len(N), k_fold)
@@ -235,59 +237,110 @@ rmse_cv <- function(formula, datos, fit_fun, k_fold = 10) {
 }
 ```
 
-Corriendo todo. Para cada lambda y orden, calculo el RMSE. 
+De los 200 sets de 10 datos voy a usar 150 para la validación cruzada. Luego, para cda uno de ellos voy a hacer validación cruzada con `k_fold = 5`, lo que implica usar 8 datos para el ajuste y 2 para la validación. Este proceso devuelve 150 valores de RMSE de validación cruzada para cada combinación de lambda y orden del polinomio. 
+
 
 ```{r}
-cv <- params[, .(rmse = rmse_cv(t ~ x,
-                                datos = datos[l == 1],
-                                fit_fun = regresion_poly(orden = orden, lambda = lambda))),
+set.seed(42)
+l_cv <- sample(unique(datos$l), 150)
+
+cv <- params[, .(rmse = 
+                   vapply(l_cv, function(L) {
+                     rmse_cv(t ~ x,
+                             datos = datos[l == L],
+                             fit_fun = regresion_poly(orden = orden, lambda = lambda))
+                   }, numeric(1)),
+                 l = l_cv),
              by = .(lambda, orden)]
 
-ggplot(cv, aes(orden, lambda)) +
-  geom_contour_filled(aes(z = log(rmse))) +
-  scale_y_log10(expand = c(0, 0)) +
-  scale_x_continuous(breaks = unique(cv$orden), expand = c(0, 0)) +
-  scale_fill_viridis_d("log(rmse)", direction = -1,
-                       guide = guide_colorsteps(show.limits = TRUE))
 ```
-
-
-¿Cuál es la "mejor" combinación de hiperparámetros?
-
-```{r echo=FALSE}
-mejor <- cv[which.min(rmse)]
-cv[order(rmse)] %>% 
-  .[1:5] %>%
-  knitr::kable(format = "latex", booktabs = TRUE, 
-               caption = "Combinación de valores de lambda y orden que minimizan el RMSE de validación cruzada")
-```
-
 
 ```{r}
-modelo <- datos[l == 1, regresion_poly(orden = mejor$orden, lambda = mejor$lambda)(t ~ x)]
+rmse_stats <- cv[, c(as.list(quantile(rmse, c(0.025, 0.5, 0.975))),
+       mean = mean(rmse)), by = .(lambda, orden)] %>% 
+  .[order(`50%`)] 
+```
 
-datos[l != 1] %>% 
+La Figura \@ref(fig:rmse-campo) muestra la mediana del RMSE de validación cruzada^[La distribución del RMSE es asimétrica, por lo que el promedio no es una medida de distribución central particularmente buena.] para los valores de lambda y orden. La variación del error refleja lo visto en las figuras \@ref(fig:ajustes-orden) y \@ref(fig:ajustes-lambda), alcanzando el máximo cuando el orden el polinomio es muy grande y el factor de regularización es muy pequeño (overfitting).
+
+```{r rmse-campo, fig.cap = "Mediana del RMSE para cada lambda y orden."}
+rmse_stats %>% 
+  ggplot(aes(orden, lambda)) +
+  metR::geom_contour_fill(aes(z = `50%`), bins = 20) +
+  geom_point(alpha = 0.5, size = 0.1) +
+  scale_y_continuous("lambda", trans = scales::log10_trans(),
+                     breaks = unique(cv$lambda),
+                     expand = c(0.01, 0)) +
+  scale_x_continuous(breaks = unique(cv$orden), expand = c(0.01, 0)) +
+  scale_fill_viridis_c("RMSE", direction = -1)
+```
+
+```{r rmse-mejores}
+rmse_stats %>% 
+  .[1:5, .(lambda, orden, mediana = signif(`50%`, 3))] %>%
+  knitr::kable(booktabs = TRUE, format = "latex",
+               caption = "Combinación de valores de lambda y orden que minimizan la mediana del RMSE de validación cruzada")
+```
+
+```{r, include = FALSE}
+lambda_min <- rmse_stats[which.min(`50%`), lambda]
+orden_min <-  rmse_stats[which.min(`50%`), orden]
+```
+
+A partir de estos datos se puede elegir la mejor combinación de lambda y orden. La Tabla \@ref(tab:rmse-mejores) lista las 5 combinaciones con menor RMSE de validación cruzada medido por la mediana. Según esta medida, la mejor combinación de hiperparámetros es lambda = `r lambda_min`, orden = `r orden_min`. Para tener una idea de la robustez de esta determinación, en la Figura \@ref(fig:rmse-orden) se ordenan las combinaciones de hiperparámetros de menor a mayor de acuerdo a la mediana del RMSE pero también se muestra el intervalo de 95% en sombreado. Se observa que la variabilidad del RMSE dentro de cada combinación de hiperparámetros es considerablemente mayor que la variabilidad de la mediana del RMSE entre distintas combinaciones de hiperparámetros. 
+
+
+```{r rmse-orden, fig.cap = "Mediana (en negro) y promedio (en violeta) del RMSE de validación cruzada e intervalo de confianza de 95\\%. Datos ordenados de menor a mayor a partir de la mediana del RMSE."}
+lab_variable <- function(x) {
+  ifelse(x == "mean", "Promedio", as.character(x))
+}
+
+rmse_stats %>% 
+  .[, l := reorder(interaction(orden, lambda, sep = " "), `50%`)] %>% 
+  ggplot(aes(l, `50%`)) +
+  geom_ribbon(aes(ymin = (`2.5%`), ymax = (`97.5%`), group = 1), 
+              alpha = 0.5, fill = "#ffe16b", color = "#d48e15") + 
+  geom_line(aes(group = 1, y = mean), color = "#a56de2") +
+  geom_line(aes(group = 1)) +
+  shadowtext::geom_shadowtext(data = ~.x[80] %>% melt(id.vars = c("l", "lambda", "orden")),
+                              size = 3, color = c("#d48e15", "black", "#d48e15", "#a56de2"), 
+                              bg.color = "white",
+                              aes(y = value, label = lab_variable(variable))) +
+  scale_y_log10("RMSE") +
+  scale_x_discrete("Combinaciones lambda x orden", 
+                   breaks = NULL)
+```
+
+Una vez elegida la combinación óptima de hiperparámetros (Tabla \@ref(tab:rmse-mejores)) lo que sigue es usarlos para ajustar el modelo con todos los 150 sets de datos usados para validación cruzada y luego testear el RMSE de test usando los 50 sets de datos que habían quedado separados para test. La distribución de RSME obtenida se ve en la Figura \@ref(fig:rmse-test). 
+
+
+```{r rmse-test, fig.cap = "Histograma del RSME de test de los 50 sets de datos no utilizados para validación cruzada."}
+modelo <- datos[l %in% l_cv, regresion_poly(orden = rmse_stats$orden[1], lambda = rmse_stats$lambda[1])(t ~ x)]
+
+datos[!(l %in% l_cv)] %>% 
   .[, pred := predict(modelo, newdata = x), by = l] %>% 
   .[, .(error_medio = sqrt(mean((t - pred)^2))), by = l] %>% 
   ggplot(aes(error_medio)) +
   geom_histogram(binwidth = 0.025, fill = NA, color = "black") +
   geom_label(data = ~.x[, .(mu = mean(error_medio), s = sd(error_medio))],
              aes(label = glue::glue("Media = {signif(mu, 2)}\nSD = {signif(s, 2)}")),
-             x = 0.6, y = 15, hjust = 0) +
+             x = 0.2, y = 5, hjust = 0) +
   scale_x_continuous("RSME") +
   scale_y_continuous(NULL) +
   geom_rug()
 ```
 
+\newpage
 
-# Apéndice
- 
-## Paquetes y setup
-
-```{r setup}
+```{r, cache = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
+# Apéndice
+
 ## Definición de D {#def-d}
+
 
 ```{r define_d}
 ```
@@ -297,6 +350,7 @@ datos[l != 1] %>%
 ```{r define_regr}
 ```
 
+
 ```{r define_methods}
 ```
 
@@ -305,3 +359,5 @@ datos[l != 1] %>%
 ```{r define_cv}
 ```
 
+Código completo que genera este informe: 
+https://github.com/eliocamp/reconocimiento-de-patrones/blob/master/TP1/README.Rmd
