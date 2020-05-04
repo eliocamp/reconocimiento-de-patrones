@@ -148,15 +148,18 @@ del error refleja lo visto en las figuras
 <a href="#fig:ajustes-orden">3</a> y
 <a href="#fig:ajustes-lambda">4</a>, alcanzando el máximo cuando el
 orden el polinomio es muy grande y el factor de regularización es muy
-pequeño (overfitting).
+pequeño (overfitting). Las líneas de corriente ilustran el campo
+vectorial de menos el gradiente. El RMSE se minimiza, entonces, en las
+zonas de convergencia de las mismas.
 
 <div class="figure">
 
-<img src="README_files/figure-gfm/rmse-campo-1.png" alt="Mediana del RMSE para cada lambda y orden."  />
+<img src="README_files/figure-gfm/rmse-campo-1.png" alt="Mediana del RMSE para cada lambda y orden. En líneas de corriente, el negativo del gradiente."  />
 
 <p class="caption">
 
-Figure 6: Mediana del RMSE para cada lambda y orden.
+Figure 6: Mediana del RMSE para cada lambda y orden. En líneas de
+corriente, el negativo del gradiente.
 
 </p>
 

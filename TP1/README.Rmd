@@ -7,8 +7,8 @@ output:
     toc: FALSE
     keep_tex: TRUE
     highlight: default
-  # bookdown::github_document2:
-  #   default
+  bookdown::github_document2:
+    default
 ---
 
 ```{r setup, include = FALSE}
@@ -263,12 +263,17 @@ rmse_stats <- cv[, c(as.list(quantile(rmse, c(0.025, 0.5, 0.975))),
   .[order(`50%`)] 
 ```
 
-La Figura \@ref(fig:rmse-campo) muestra la mediana del RMSE de validación cruzada^[La distribución del RMSE es asimétrica, por lo que el promedio no es una medida de distribución central particularmente buena.] para los valores de lambda y orden. La variación del error refleja lo visto en las figuras \@ref(fig:ajustes-orden) y \@ref(fig:ajustes-lambda), alcanzando el máximo cuando el orden el polinomio es muy grande y el factor de regularización es muy pequeño (overfitting).
+La Figura \@ref(fig:rmse-campo) muestra la mediana del RMSE de validación cruzada^[La distribución del RMSE es asimétrica, por lo que el promedio no es una medida de distribución central particularmente buena.] para los valores de lambda y orden. La variación del error refleja lo visto en las figuras \@ref(fig:ajustes-orden) y \@ref(fig:ajustes-lambda), alcanzando el máximo cuando el orden el polinomio es muy grande y el factor de regularización es muy pequeño (overfitting). Las líneas de corriente ilustran el campo vectorial de menos el gradiente. El RMSE se minimiza, entonces, en las zonas de convergencia de las mismas. 
 
-```{r rmse-campo, fig.cap = "Mediana del RMSE para cada lambda y orden."}
+```{r rmse-campo, fig.cap = "Mediana del RMSE para cada lambda y orden. En líneas de corriente, el negativo del gradiente."}
 rmse_stats %>% 
+  copy() %>% 
+  .[, c("dl", "do") := metR::Derivate(`50%` ~ log(lambda) + orden, fill = TRUE)] %>% 
   ggplot(aes(orden, lambda)) +
   metR::geom_contour_fill(aes(z = `50%`), bins = 20) +
+  metR::geom_streamline(aes(dx = -do, dy = -dl), res = 3, n = 10, 
+                        L = 20, alpha = 0.5, 
+                        size = 0.05) +
   geom_point(alpha = 0.5, size = 0.1) +
   scale_y_continuous("lambda", trans = scales::log10_trans(),
                      breaks = unique(cv$lambda),

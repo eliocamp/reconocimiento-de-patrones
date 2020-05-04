@@ -162,10 +162,10 @@ Defino una función para calcular el RSME de validación cruzada\footnote{Defini
 
 De los 200 sets de 10 datos voy a usar 150 para la validación cruzada. Luego, para cda uno de ellos voy a hacer validación cruzada con \texttt{k\_fold\ =\ 5}, lo que implica usar 8 datos para el ajuste y 2 para la validación. Este proceso devuelve 150 valores de RMSE de validación cruzada para cada combinación de lambda y orden del polinomio.
 
-La Figura \ref{fig:rmse-campo} muestra la mediana del RMSE de validación cruzada\footnote{La distribución del RMSE es asimétrica, por lo que el promedio no es una medida de distribución central particularmente buena.} para los valores de lambda y orden. La variación del error refleja lo visto en las figuras \ref{fig:ajustes-orden} y \ref{fig:ajustes-lambda}, alcanzando el máximo cuando el orden el polinomio es muy grande y el factor de regularización es muy pequeño (overfitting).
+La Figura \ref{fig:rmse-campo} muestra la mediana del RMSE de validación cruzada\footnote{La distribución del RMSE es asimétrica, por lo que el promedio no es una medida de distribución central particularmente buena.} para los valores de lambda y orden. La variación del error refleja lo visto en las figuras \ref{fig:ajustes-orden} y \ref{fig:ajustes-lambda}, alcanzando el máximo cuando el orden el polinomio es muy grande y el factor de regularización es muy pequeño (overfitting). Las líneas de corriente ilustran el campo vectorial de menos el gradiente. El RMSE se minimiza, entonces, en las zonas de convergencia de las mismas.
 
 \begin{figure}
-\includegraphics{README_files/figure-latex/rmse-campo-1} \caption[Mediana del RMSE para cada lambda y orden]{Mediana del RMSE para cada lambda y orden.}\label{fig:rmse-campo}
+\includegraphics{README_files/figure-latex/rmse-campo-1} \caption[Mediana del RMSE para cada lambda y orden]{Mediana del RMSE para cada lambda y orden. En líneas de corriente, el negativo del gradiente.}\label{fig:rmse-campo}
 \end{figure}
 
 \begin{table}
