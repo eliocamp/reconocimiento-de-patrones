@@ -3,12 +3,12 @@ title: "TP1 - Reconocimiento de Patrones"
 author: "Elio Campitelli"
 date: "4/17/2020"
 output: 
-  bookdown::tufte_handout2: 
+  bookdown::tufte_handout2:
     toc: FALSE
     keep_tex: TRUE
     highlight: default
-  bookdown::github_document2:
-    default
+  # bookdown::github_document2:
+  #   default
 ---
 
 ```{r setup, include = FALSE}
@@ -280,7 +280,7 @@ rmse_stats %>%
 ```{r rmse-mejores}
 rmse_stats %>% 
   .[1:5, .(lambda, orden, mediana = signif(`50%`, 3))] %>%
-  knitr::kable(booktabs = TRUE, format = "latex",
+  knitr::kable(booktabs = TRUE,
                caption = "Combinación de valores de lambda y orden que minimizan la mediana del RMSE de validación cruzada")
 ```
 

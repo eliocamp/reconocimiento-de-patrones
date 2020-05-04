@@ -162,18 +162,29 @@ Figure 6: Mediana del RMSE para cada lambda y orden.
 
 </div>
 
+| lambda | orden | mediana |
+| -----: | ----: | ------: |
+|  1e-04 |     4 |   0.384 |
+|  1e-05 |     3 |   0.385 |
+|  1e-04 |     5 |   0.387 |
+|  1e-04 |     3 |   0.389 |
+|  1e-07 |     3 |   0.407 |
+
+Table 1: Combinación de valores de lambda y orden que minimizan la
+mediana del RMSE de validación cruzada
+
 A partir de estos datos se puede elegir la mejor combinación de lambda y
-orden. La Tabla <a href="#tab:rmse-mejores"><strong>??</strong></a>
-lista las 5 combinaciones con menor RMSE de validación cruzada medido
-por la mediana. Según esta medida, la mejor combinación de
-hiperparámetros es lambda = 10^{-4}, orden = 4. Para tener una idea de
-la robustez de esta determinación, en la Figura
-<a href="#fig:rmse-orden">7</a> se ordenan las combinaciones de
-hiperparámetros de menor a mayor de acuerdo a la mediana del RMSE pero
-también se muestra el intervalo de 95% en sombreado. Se observa que la
-variabilidad del RMSE dentro de cada combinación de hiperparámetros es
-considerablemente mayor que la variabilidad de la mediana del RMSE entre
-distintas combinaciones de hiperparámetros.
+orden. La Tabla <a href="#tab:rmse-mejores">1</a> lista las 5
+combinaciones con menor RMSE de validación cruzada medido por la
+mediana. Según esta medida, la mejor combinación de hiperparámetros es
+lambda = 10^{-4}, orden = 4. Para tener una idea de la robustez de esta
+determinación, en la Figura <a href="#fig:rmse-orden">7</a> se ordenan
+las combinaciones de hiperparámetros de menor a mayor de acuerdo a la
+mediana del RMSE pero también se muestra el intervalo de 95% en
+sombreado. Se observa que la variabilidad del RMSE dentro de cada
+combinación de hiperparámetros es considerablemente mayor que la
+variabilidad de la mediana del RMSE entre distintas combinaciones de
+hiperparámetros.
 
 <div class="figure">
 
@@ -190,11 +201,11 @@ menor a mayor a partir de la mediana del RMSE.
 </div>
 
 Una vez elegida la combinación óptima de hiperparámetros (Tabla
-<a href="#tab:rmse-mejores"><strong>??</strong></a>) lo que sigue es
-usarlos para ajustar el modelo con todos los 150 sets de datos usados
-para validación cruzada y luego testear el RMSE de test usando los 50
-sets de datos que habían quedado separados para test. La distribución de
-RSME obtenida se ve en la Figura <a href="#fig:rmse-test">8</a>.
+<a href="#tab:rmse-mejores">1</a>) lo que sigue es usarlos para ajustar
+el modelo con todos los 150 sets de datos usados para validación cruzada
+y luego testear el RMSE de test usando los 50 sets de datos que habían
+quedado separados para test. La distribución de RSME obtenida se ve en
+la Figura <a href="#fig:rmse-test">8</a>.
 
 <div class="figure">
 
