@@ -1,7 +1,6 @@
 TP1 - Reconocimiento de Patrones
 ================
 Elio Campitelli
-4/17/2020
 
 # Generar set de datos
 
