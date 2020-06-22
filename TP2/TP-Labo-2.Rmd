@@ -3,10 +3,6 @@ title: "TP2 - Reconocimiento de Patrones"
 author: "Elio Campitelli"
 output: 
   bookdown::tufte_html2:
-    # toc: FALSE
-    # keep_tex: TRUE
-    highlight: default
-  bookdown::github_document2:
     default
 bibliography: bibliography.bib
 biblio-style: apalike-es
@@ -21,18 +17,29 @@ library(palmerpenguins)
 library(kableExtra)
 
 
-theme_set(ggthemes::theme_tufte())
+theme_set(ggthemes::theme_tufte(base_size = 14) +
+            theme(plot.background = element_rect(fill = "#FEFFF8", colour = NA))
+          
+)
 knitr::opts_chunk$set(tidy = FALSE, message = FALSE, warning = FALSE, 
-                      cache = TRUE, cache.extra = 1, echo = FALSE, fig.align = "center")
+                      cache = TRUE, cache.extra = 1, echo = FALSE)
 
 label_null <- as_labeller(function(x) "")
 
-scale_color_penguin <- scale_fill_manual(values = c(adelaida = "darkorange", 
-                                                    barbijo = "purple", 
-                                                    juanito = "cyan4"), aesthetics = c("color", "fill"))
+pen_cols <- c(adelaida = "darkorange", 
+              barbijo = "purple", 
+              juanito = "cyan4")
+scale_color_penguin <- scale_fill_manual(values = pen_cols, aesthetics = c("color", "fill"))
 
 update_geom_defaults(GeomPoint, list(size = 0.5))
 set.seed(42)
+```
+
+```{r}
+
+
+
+
 ```
 
 
@@ -69,7 +76,7 @@ knitr::kable(penguins[, head(.SD, 3), by = especie], booktabs = TRUE,
 La variable categórica a predecir va a ser la especie, y las posibles variables predictoras son las dimensiones del culmen, la longitud de la aleta y la masa corporal. Es decir, en principio es un espacio de dimensión 4. Como la idea es trabajar en $\mathbb{R}^2$, conviene explorar qué grado de separación permite cada combinación de dos variables. Esto se muestra en la Figura \@ref(fig:pairs) donde se grafican scatterplots para todas las combinaciones de dos variables con la especie representada con color. Mirando las densidades de probabilidad (gráficos en la diagonal) se puede ver que la longitud del culmen separa bastante bien entre pingüino de adelaida y el resto mientras que las otras variables separan bien al pingüino juanito. Por lo tanto, las combinaciones que incluyen la longitud del culmen (gráficos en la primera columna) separan bastante bien entre las tres especies, mientras que el resto de las combinaciones tienen algún grado de mezcla entre pingüino de adelaida y pingüino juanito.
 
 
-```{r pairs, fig.cap = "Scatteplot de todas las combinaciones de variables posibles en $\\mathbb{R}^2$. En la diagonal, estimaciones de densidad de cada variable separadas por especies.", fig.height=4, fig.width=6, fig.fullwidth = TRUE}
+```{r pairs, fig.cap = "Scatteplot de todas las combinaciones de variables posibles en $\\mathbb{R}^2$. En la diagonal, estimaciones de densidad de cada variable separadas por especies.", fig.width = 10, fig.height = 6, fig.fullwidth = TRUE}
 ggplot(penguins, aes(.panel_x, .panel_y)) +
   geom_point(aes(color = especie), size = 0.1) +
   ggforce::geom_autodensity(aes(fill = especie), alpha = 0.6, position = "dodge") +
@@ -77,7 +84,6 @@ ggplot(penguins, aes(.panel_x, .panel_y)) +
                         layer.diag = 2) +
   scale_color_penguin +
   theme(legend.position = "bottom")
-
 ```
 
 En lo que sigue, voy a usar los datos de Longitud de culmen y de alto del culmen para separar entre las tres especies. 
@@ -109,9 +115,11 @@ ejes <- list(labs(x = x, y = y, fill = z, color = z))
 
 # Clasificador cuadrático
 
+La función `clasificador_cuadratico` genera un modelo lineal de clasificación que es esencialmente un modelo lineal multivariado donde las $K$ variables dependientes representan a las $K$ categorías usando one-hot encoding. Es decir, el modelo tiene $M$ predictores y $K$ predicciones, una para cada clase. La clasificación se hace asignando la clase que tiene el valor máximo. 
+
+La partición del espacio $\mathbb{R}^2$ elegido usando el resultado del clasificador cuadrático se muestra en la Figura \@ref(fig:cuadratico). Dado que el clasificador es lineal, las divisiones entre categorías son rectas que se intersectan en un punto central. 
 
 ```{r}
-
 clasificador_cuadratico <- function(formula, data = environment(formula)) { 
   # one-hot encoding de las categorías
   data <- model.frame(formula, data)
@@ -138,7 +146,7 @@ clasificador_cuadratico <- function(formula, data = environment(formula)) {
 }
 
 
-predict.cuadratico <- function(object, newdata, ...) {
+predict.cuadratico <- function(object, newdata, prediction = c("level", "confidence"), ...) {
   formula <- attr(object, "formula", TRUE)
   formula <- delete.response(terms(formula))
   sd <- attr(object, "sd", TRUE)
@@ -149,17 +157,18 @@ predict.cuadratico <- function(object, newdata, ...) {
   
   levels <- attr(object, "levels", TRUE)
   pred <- bare_data %*% object
-  factor(levels[max.col(pred)], levels = levels)
+  if (prediction[1] == "level") {
+    return(factor(levels[max.col(pred)], levels = levels)  )
+  } else { 
+    pred <- as.data.frame(pred)
+    colnames(pred) <- levels
+    return(as.list(pred))
+  }
 }
 ```
 
 
-
-
-
-```{r}
-
-
+```{r cuadratico, fig.cap = "Clasificación en base a clasificador cuadrático. \"Precisión\" se define como la proporción de observaciones clasificadas como una determinada especie que fueron clasificadas correctamente, \"Exhaustividad\" se define como la proporción de observaciones de cada especie correctamente clasificadas."}
 W <- clasificador_cuadratico(z ~ x + y, data)
 
 data$pred <- predict(W, data)
@@ -168,16 +177,43 @@ div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 140),
                    y = seq(min(data$y), max(data$y), length.out = 140))
 
 div$pred <- predict(W, div)
+data[] %>% 
+  copy() %>% 
+  .[, correct := pred == z] %>% 
+  .[, mean(correct), by = z] %>% 
+  .[, scales::percent(V1)] ->  exhaustividad
+
+data[] %>% 
+  copy() %>% 
+  .[, correct := pred == z] %>% 
+  .[, mean(correct), by = pred] %>% 
+  .[, scales::percent(V1)] -> precision
+
+
+medidas <- paste0("Precisión = ", precision, "\nExhaustividad = ", exhaustividad)
 
 
 ggplot(data, aes(x, y)) +
   geom_raster(aes(fill = pred), data = div, alpha = 0.4) +
   geom_point(aes(color = z)) +
+  annotate(shadowtext:::GeomShadowText, 
+           label = medidas, 
+           x = c(32, 59, 59),
+           y = c(21, 13.5, 20), 
+           color = pen_cols[c(1, 3, 2)],
+           hjust = c(0, 1, 1),
+           vjust = c(1, 0, 0),
+           bg.r = 0.20, bg.color = "#FEFFF8", size = 4.5,
+           family = hrbrthemes::font_rc_light) +
   scale_color_penguin +
   ejes +
-  guides(fill = "none", color = "none") +
-  coord_fixed(2)
+  coord_fixed(2) +
+  theme(legend.position = "bottom")
 ```
+
+Se muestran dos medidas de la clasificación para cada especie. "Exhaustividad" es la proporción de observaciones que son clasificadas como una especie de forma correcta. "Precisión" es la proporción de observaciones de una determinada especie que son clasificadas correctamente. Es decir, la exhaustividad  del 100% para los pingüinos adelaida implica que la probabilidad de que un pingüino adelaida sea correctamente clasificado es del 100%. Sin embargo, la precisión del 92% implica que si el modelo clasifica un pingüino como adelaida, hay un 92% de probabilidad de que haya sido clasificado correctamente. 
+
+Comparando estas medidas entre los pingüinos adelaida y barbijo se ilustra el balance entre ambas medidas. Una alta exhaustividad suele significar baja precisión y viceversa. 
 
 
 
@@ -308,46 +344,46 @@ sigmoid = function(x) {
 }
 
 
-X_raw <- as.matrix(d[, .(x, y)])
-X <- scale(X_raw)
-t <- matrix(d[, as.numeric(z == "barbijo")], ncol = 1)
 
 solve_sigmoid <- function(X, t, conv_tol = 1e-4, max_iter = 1e4) {
-  
-  W <- matrix(rep(0, ncol(X)), nrow = ncol(X), ncol = 1)
+  W <- matrix(rep(0, ncol(X)), nrow = ncol(X), ncol = ncol(t))
   hist <- list(W)
-  converged <- FALSE
+  converged <- rep(FALSE, ncol(t))
   
   for (i in seq_len(max_iter)) {
     y <- sigmoid(t(t(W) %*% t(X)))
     y[y == 1] <- 1 - 1e-9
     y[y == 0] <- 0 + 1e-9
-    R <- diag(as.vector(y*(1-y)), nrow = length(y))
-    R_inv <- diag(1/as.vector(y*(1-y)), nrow = length(y))
-    Z <-  X %*% W - R_inv %*% (y - t)
     
-    W_new <- solve(t(X) %*% R %*% X) %*% t(X) %*% R %*% Z  
+    for (j in seq_len(ncol(t))) {
+      if (!converged[j]) {
+        r <- as.vector(y[, j]*(1 - y[, j]))
+        R <- diag(r, nrow = length(r))
+        R_inv <- diag(1/r, nrow = nrow(y))
+        Z <-  X %*% W[, j] - R_inv %*% (y[, j] - t[, j])
+        W_j_new <- solve(t(X) %*% R %*% X) %*% t(X) %*% R %*% Z    
+        rel_change <- abs(W[, j] - W_j_new)/abs(W[, j])
+        converged[j] <- all(rel_change <= conv_tol)
+        W[, j] <- W_j_new
+      }
+      hist[[i + 1]] <- W
+    }
     
-    rel_change <- abs(W - W_new)/abs(W)
-    converged <- all(rel_change <= conv_tol)
-    
-    browser(expr = is.na(converged))
-    if (is.na(converged) || converged) {
+    if (all(converged)) {
       break
     }
     
-    W <- W_new
-    hist[[i + 1]] <- W
   }
-  # browser()
+  
   list(W = hist, converged = converged)
 }
 
 
 logistica <- function(formula, data, conv_tol = 1e-4, max_iter = 1e4) {
   # one-hot encoding de las categorías
-  frame <- model.frame(formula, data)
-  t <- as.numeric(frame[, 1] == levels(frame[, 1])[1])
+  data <- model.frame(formula, data)
+  formula_hot <- paste0("~ 0 + ", deparse(formula[[2]]))
+  t <- model.matrix(as.formula(formula_hot), data = data)
   
   # datos de predictores
   bare_data <- model.matrix(formula, data)
@@ -364,12 +400,12 @@ logistica <- function(formula, data, conv_tol = 1e-4, max_iter = 1e4) {
   
   W <- solve_sigmoid(bare_data_scaled, t, conv_tol = conv_tol, max_iter = max_iter)
   # browser()
-  if (is.na(W$converged) || !W$converged) {
+  if (any(is.na(W$converged) || !W$converged)) {
     warning("Iteration didn't converge!")
   }
   
   structure(.Data = W$W,
-            levels = levels(frame[, 1]),
+            levels = levels(data[, 1]),
             formula = formula, 
             center = center, 
             sd = sd,
@@ -393,20 +429,20 @@ predict.logistica <- function(object,
   lapply(n, function(i) {
     W <- object[[i]]
     # browser()
-    pred <- t(t(W) %*% t(bare_data))
+    pred <- sigmoid(t(t(W) %*% t(bare_data)))
     if (type[1] == "prediction") {
-      pred <- sigmoid(pred)
-      pred <- factor(levels[-sign(pred - cutoff)/2 + 1.5], levels = levels)
-    } else if (type[1] == "sigmoid") {
-      pred <- sigmoid(pred)
-    } 
+      pred <- factor(levels[max.col(pred)], levels = levels)
+    } else {
+      pred <- as.data.frame(pred)
+      colnames(pred) <- levels
+    }
     return(pred)
   })
 }
 
 
 
-model <- logistica(z ~ x + y, data = d)
+model <- logistica(z ~ x + y, data = data)
 
 
 
@@ -418,13 +454,16 @@ preds <- predict(model, div, type = "sigmoid", n = seq_along(model))
 
 hist <- lapply(preds, function(p) {
   d <- div
-  d$pred <- p
+  class <- max.col(p)
+  d$pred <- colnames(p)[class]
+  d$conf <- t(as.matrix(pt))[class]
   d
 }) %>% 
   rbindlist(idcol = "iter")
 
-ggplot(d, aes(x, y)) +
-  geom_raster(aes(fill = pred), data = hist, interpolate = TRUE) +
+ggplot(data, aes(x, y)) +
+  geom_raster(aes(fill = pred, alpha = 1/conf),
+              data = hist, interpolate = TRUE) +
   # geom_contour(aes(z = pred), data = hist, breaks = 0.5) +
   geom_point(aes(color = z)) +
   # scale_color_penguin +
