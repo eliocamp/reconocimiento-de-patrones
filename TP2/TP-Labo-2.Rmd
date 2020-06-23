@@ -447,66 +447,71 @@ model <- logistica(z ~ x + y, data = data)
 
 
 
-div <- expand.grid(x = seq(min(d$x), max(d$x), length.out = 40), 
-                   y = seq(min(d$y), max(d$y), length.out = 40))
+div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 90), 
+                   y = seq(min(data$y), max(data$y), length.out = 90))
+
 preds <- predict(model, div, type = "sigmoid", n = seq_along(model))
 
 
 hist <- lapply(preds, function(p) {
   d <- div
   class <- max.col(p)
-  d$pred <- colnames(p)[class]
-  d$conf <- t(as.matrix(pt))[class]
+  d$pred <- factor(colnames(p)[class], levels = attr(model, "levels"))
+  d$conf <- apply(as.matrix(p), 1, max)
   d
 }) %>% 
   rbindlist(idcol = "iter")
 
-ggplot(data, aes(x, y)) +
-  geom_raster(aes(fill = pred, alpha = 1/conf),
-              data = hist, interpolate = TRUE) +
-  # geom_contour(aes(z = pred), data = hist, breaks = 0.5) +
-  geom_point(aes(color = z)) +
-  # scale_color_penguin +
-  # ejes +
-  # guides(fill = "none", color = "none") +
-  # coord_fixed(2) +
+
+ggplot(hist, aes(x, y)) +
+  geom_raster(aes(fill = pred, group = 1, alpha = conf), interpolate = TRUE) +
+  scale_alpha_continuous(range = c(0.1, 0.4), guide = "none") +
+  geom_point(aes(color = z), data = data) +
+  scale_color_penguin +
+  ejes +
+  labs(fill = "Especie", color = "Especie") +
+  coord_fixed(2) +
   gganimate::transition_states(iter, state_length = 0) +
-  labs(subtitle = "Iteración: {previous_state}")
+  labs(subtitle = "Iteración: {previous_state}") +
+  theme(legend.position = "bottom")
 ```
-
-
 
 ```{r}
 
-data_elip <- data
-data_elip$z <- factor(data$z == "barbijo")
+# data_elip <- data
+# data_elip$z <- factor(data$z == "barbijo")
 
-model <- logistica(z ~ x + y + I(x^2) + I(y^2) + I(x*y), data = data_elip)
+model <- logistica(z ~ x + y + I(x^2) + I(y^2) + I(x*y), data = data)
 
 
-div <- expand.grid(x = seq(min(data_elip$x), max(data_elip$x), length.out = 40), 
-                   y = seq(min(data_elip$y), max(data_elip$y), length.out = 40))
+
+div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 90), 
+                   y = seq(min(data$y), max(data$y), length.out = 90))
 
 preds <- predict(model, div, type = "sigmoid", n = seq_along(model))
 
 
 hist <- lapply(preds, function(p) {
   d <- div
-  d$pred <- p
+  class <- max.col(p)
+  d$pred <- factor(colnames(p)[class], levels = attr(model, "levels"))
+  d$conf <- apply(as.matrix(p), 1, max)
   d
 }) %>% 
   rbindlist(idcol = "iter")
 
-ggplot(data_elip, aes(x, y)) +
-  # geom_raster(aes(fill = pred), data = div, alpha = 0.4) +
-  geom_raster(aes(fill = pred), data = hist, alpha = 0.4, interpolate = TRUE) +
-  geom_point(aes(color = z)) +
-  # scale_color_penguin +
+
+ggplot(hist, aes(x, y)) +
+  geom_raster(aes(fill = pred, group = 1, alpha = conf), interpolate = TRUE) +
+  scale_alpha_continuous(range = c(0.1, 0.4), guide = "none") +
+  geom_point(aes(color = z), data = data) +
+  scale_color_penguin +
   ejes +
-  # guides(fill = "none", color = "none") +
+  labs(fill = "Especie", color = "Especie") +
   coord_fixed(2) +
   gganimate::transition_states(iter, state_length = 0) +
-  labs(subtitle = "Iteración: {previous_state}")
+  labs(subtitle = "Iteración: {previous_state}") +
+  theme(legend.position = "bottom")
 ```
 
 
