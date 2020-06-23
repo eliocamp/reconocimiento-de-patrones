@@ -509,47 +509,61 @@ EM <- function(data, k, n_iter = 1e5, tol = 1e-6) {
             center = center,
             sd = sd)
 }
-# }
+augment_em <- function(distr_hist, data) {
+  
+  elipses <- lapply(distr_hist, function(i) {
+    lapply(i, function(k) {
+      as.data.table(ellipse::ellipse(k$sigma, centre = k$mu))
+    }) %>% 
+      rbindlist(idcol = "class")
+  }) %>% 
+    rbindlist(idcol = "iter")
+  
+  centers <- lapply(distr_hist, function(i) {
+    lapply(i, function(k) {
+      # browser()
+      k$mu
+    }) %>% 
+      do.call(rbind, .) %>% 
+      as.data.table() %>% 
+      .[, class := 1:.N] %>% 
+      .[]
+  }) %>% 
+    rbindlist(idcol = "iter")
+  
+  ultimo <- distr_hist[[length(distr_hist)]]
+  
+  div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 140), 
+                     y = seq(min(data$y), max(data$y), length.out = 140))
+  density <- lapply(ultimo, function(k) {
+    mvtnorm::dmvnorm(as.matrix(div), mean = k$mu, sigma = k$sigma)
+  })
+  
+  div$conf <- apply(as.matrix(as.data.table(density)), 1, function(x) max(x)/sum(x))
+  div$pred <- factor(max.col(as.matrix(as.data.table(density))))
+  
+  return(list(centers = centers, elipses = elipses, div = div))
+}
 
 ```
 
 
-
-```{r em-pinguinos, fig.cap = "Media y elipse normal "}
+```{r em-pinguinos, fig.cap = "Medias y elipses normales representando el cuantil del 95% para los clusters identificados por Expectation Maximisation con k = 2 (izquierda) y k = 3 (derecha)."}
 set.seed(123)
-distr_hist <- EM(data[, .(x, y)], k = 3)
 
-elipses <- lapply(distr_hist, function(i) {
-  lapply(i, function(k) {
-    as.data.table(ellipse::ellipse(k$sigma, centre = k$mu))
-  }) %>% 
-    rbindlist(idcol = "class")
-}) %>% 
-  rbindlist(idcol = "iter")
+em3 <- augment_em(EM(data[, .(x, y)], k = 3), data)
+em2 <- augment_em(EM(data[, .(x, y)], k = 2), data)
 
-centers <- lapply(distr_hist, function(i) {
-  lapply(i, function(k) {
-    # browser()
-    k$mu
-  }) %>% 
-    do.call(rbind, .) %>% 
-    as.data.table() %>% 
-    .[, class := 1:.N] %>% 
-    .[]
-}) %>% 
-  rbindlist(idcol = "iter")
 
-ultimo <- distr_hist[[length(distr_hist)]]
 
-div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 140), 
-                   y = seq(min(data$y), max(data$y), length.out = 140))
-density <- lapply(ultimo, function(k) {
-  mvtnorm::dmvnorm(as.matrix(div), mean = k$mu, sigma = k$sigma)
-})
+div <- rbind(`3`= as.data.table(em3$div), `2` = as.data.table(em2$div), idcol = "k") %>% 
+  .[, pred := factor(as.character(pred))]
 
-div$conf <- apply(as.matrix(as.data.table(density)), 1, function(x) max(x)/sum(x))
-div$pred <- factor(max.col(as.matrix(as.data.table(density))))
+elipses <- rbind(`3`= as.data.table(em3$elipses), `2` = as.data.table(em2$elipses), idcol = "k") %>% 
+  .[, class := factor(as.character(class))]
 
+centers <- rbind(`3`= as.data.table(em3$centers), `2` = as.data.table(em2$centers), idcol = "k") %>% 
+  .[, class := factor(as.character(class))]
 
 
 div %>% 
@@ -558,9 +572,10 @@ div %>%
   geom_contour(aes(z = conf, alpha = ..level.., color = pred)) +
   scale_alpha_continuous(range = c(0.1, 0.4), guide = "none") +
   
-  geom_path(data = elipses[iter == max(iter)],
+  geom_path(data = elipses[, .SD[iter == max(iter)], by = k],
             aes(group = class, color = factor(class))) +
-  geom_point(data = centers[iter == max(iter)], aes(color = factor(class)), size = 3) +
+  geom_point(data = centers[, .SD[iter == max(iter)], by = k],
+             aes(color = factor(class)), size = 3) +
   
   scale_fill_brewer("k", palette = "Set2") +
   scale_color_brewer("k", palette = "Set2") +
@@ -571,14 +586,13 @@ div %>%
   geom_point(data = data, aes(color = factor(z))) +
   
   ejes +
-  labs(x = NULL) +
   scale_color_penguin +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") +
+  facet_wrap(~k, labeller = labeller(k = function(x) paste0("k = ", x)))
 ```
-La Figura \@ref(fig:em-pinguinos) muestra el resultado del algoritmo de EM con los datos de pingüinos con 2 clases. Los puntos son las medias de las distribuciones normales y las elipses marcan la el cuartil del 95%. Escala de colores de las 3 clases y las 3 especies no son las mismmas ya que no hay concordancia entre ambas necesariamente. El espacio se particiona entre las 3 clases a partir de la densidad de probabilidad normal de cada clase encontrada por EM y tomando la clase que maximiza la misma. 
+La Figura \@ref(fig:em-pinguinos) muestra los resultados del algoritmo de EM con los datos de pingüinos con 2 y 3 clases respectivamente. Los puntos son las medias de las distribuciones normales y las elipses marcan la el cuartil del 95%. Escala de colores de las clases de EM y las 3 especies no son las mismmas ya que no hay concordancia entre ambas necesariamente. El espacio se particiona entre las clases a partir de la densidad de probabilidad normal de cada clase encontrada por EM y tomando la clase que maximiza la misma. 
 
-La clase 3 (celeste) coincide bien con los pingüinos juanito, ya que éstos se separan bien del resto, pero las clases 1 y 2 no representan bien las especies adelaida y barbijo. 
-
+La parciticón con 2 clases separa correctmaente los pingüinos juanito de las otras dos especies. La partición con 3 clases, en cambio, identifica el *cluster* de los pingüinos juanito, pero no hay separación entre los otras dos especies. 
 
 ## Fisher
 
@@ -629,8 +643,8 @@ predict.fischer <- function(object, newdata) {
 
 
 ```{r}
-d <- data[z != "juanito"]
-
+d <- data
+d$z <- d$z == "juanito"
 f <- with(d, fischer(z, x, y))
 
 d$proj <- as.matrix(d[, .(x, y)]) %*% f
@@ -640,12 +654,11 @@ d$proj <- as.matrix(d[, .(x, y)]) %*% f
 
 ```{r}
 ggplot(d, aes(x, y)) +
-  geom_point(aes(color = z))
+  geom_point(aes(color = z)) 
 
-ggplot(d, aes(proj)) +
+ggplot(d, aes(-proj)) +
   geom_density(aes(color = z, fill = z), alpha = 0.5) +
-  geom_rug(aes(color = z)) +
-  scale_color_penguin 
+  geom_rug(aes(color = z)) 
 ```
 
 
