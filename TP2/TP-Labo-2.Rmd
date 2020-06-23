@@ -35,13 +35,6 @@ update_geom_defaults(GeomPoint, list(size = 0.5))
 set.seed(42)
 ```
 
-```{r}
-
-
-
-
-```
-
 
 ```{r}
 data(penguins)
@@ -86,38 +79,88 @@ ggplot(penguins, aes(.panel_x, .panel_y)) +
   theme(legend.position = "bottom")
 ```
 
-En lo que sigue, voy a usar los datos de Longitud de culmen y de alto del culmen para separar entre las tres especies. 
+Para hacer las cosas más interesantes, voy a seleccionar el espacio formdado por el largo de la aleta y la masa. En este espacio $\mathbb{R}^2$, los piingüinos juanitos se separan muy bien de los otros, pero los adelaida y los barbijo están mezclados y son imposibles de separar. 
+
 
 ```{r}
 data <- penguins[, .(z = factor(especie), 
-                     x = culmen_longitud, 
-                     y = culmen_alto)] %>% 
+                     x = aleta_largo, 
+                     y = masa)] %>% 
   na.omit()
 
-x <- "Longitud de culmen [mm]"
-y <- "Alto de culmen [mm]"
+x <- "Largo de la aleta [mm]"
+y <- "Masa [g]"
 z <- "Especie"
 
 ejes <- list(labs(x = x, y = y, fill = z, color = z))
 ```
 
 
-```{r}
-# ggplot(data, aes(x, y)) +
-#   geom_point(aes(color = z)) +
-#   ejes +
-#   directlabels::geom_dl(aes(label = z, color = z), method = "smart.grid") +
-#   
-#   scale_color_penguin +
-#   guides(fill = "none", color = "none")
-```
 
+```{r densidad, fig.cap = "Separación del espacio a partir de estimar la densidad con un kernel gausiano de distintos anchos de banda."}
+density2d <- function(x, y, group, bandiwdths, ...) {
+  xy <- na.omit(data.table(x, y, group))
+  xy_scaled <- scale(xy[, c("x", "y")])
+  center <- attr(xy_scaled, "scaled:center")
+  sd <- attr(xy_scaled, "scaled:scale")
+  
+  lims <- c(apply(xy_scaled, 2, range))
+  
+  base_bandwidth <- mean(c(MASS::bandwidth.nrd(xy_scaled[, 1]),
+                           MASS::bandwidth.nrd(xy_scaled[, 2])))
+  
+  bandwidths <- bandiwdths*base_bandwidth
+  
+  xy_scaled <- as.data.table(xy_scaled)
+  xy_scaled$group <- xy$group
+  
+  density <- function(x, y, h) {  
+    d <- MASS::kde2d(x, y, h = h, lims = lims, n = 200)
+    dimnames(d$z) <-  list(x = d$x, 
+                           y = d$y)
+    res <- reshape2::melt(d$z)  
+    res$bandwidth <- h
+    res
+  }
+  
+  out <- xy_scaled[, rbindlist(lapply(bandwidths, function(h) density(x, y, h))), by = group]
+  
+  out[, x := x*sd[1] + center[1]]
+  out[, y := y*sd[2] + center[2]]
+  out[]
+}
+
+
+density <- data[, density2d(x, y, z, c(1/4, 1, 4, 10))]
+
+ggplot(data, aes(x, y)) +
+  geom_raster(data = density[, .(z = group[which.max(value)], 
+                                 conf = max(value)/sum(value)), 
+                             by = .(x, y, bandwidth)],
+              aes(x, y, fill = z, alpha = conf)) +
+  geom_contour(data = density[, .(z = group[which.max(value)], 
+                                  conf = max(value)/sum(value)), 
+                              by = .(x, y, bandwidth)],
+               aes(x, y, z = conf, color = z, alpha = ..level..)) +
+  scale_alpha_continuous(range = c(0.1, 0.4), guide = "none") +
+  # metR::geom_contour2(data = density, aes(x, y, z = value, color = group), global.breaks = FALSE,
+  #                     size = 0.3, alpha = 0.4) +
+  geom_point(aes(color = z), size = 0.1) +
+  scale_color_penguin +
+  ejes +
+  # coord_fixed(2) +
+  # guides(fill = "none", color = "none") +
+  facet_wrap(bandwidth~., ncol = 2, labeller = labeller(bandwidth = function(x) paste0("Ancho de banda = ",
+                                                                                       signif(as.numeric(x), 3))))  +
+  theme(legend.position = "bottom")
+```
+La Figura \@ref(fig:densidad) muestra distintas particiones posibles del espacio a partir de estimar las densidades de probabilidad conjunta de cada clase y asignando la clase con mayor densidad de probabilidad en cada punto^[Dada la diferencia de escalas de x e y, en principio el valor del ancho de banda no podría ser el mismo para ambas dimensiones. Para armonizarlas, se hicieron los cálculos en base a las variables estandarizadas]. Cuando el ancho de banda es muy pequeño, se observa que el clasificación sufre de overfitting. Las regiones clasifican perfectamente los datos observados, pero los límites de decisión se curva para rodear puntos aislados. Para un ancho de banda muy grande, los límites de decisión tidneden a rectas y se ve que las estimaciones de densidad son círculos concéntricos que ignoran la covarianza entre los datos.
 
 # Clasificador cuadrático
 
-La función `clasificador_cuadratico` genera un modelo lineal de clasificación que es esencialmente un modelo lineal multivariado donde las $K$ variables dependientes representan a las $K$ categorías usando one-hot encoding. Es decir, el modelo tiene $M$ predictores y $K$ predicciones, una para cada clase. La clasificación se hace asignando la clase que tiene el valor máximo. 
+La función `clasificador_cuadratico` genera un modelo lineal de clasificación que es esencialmente un modelo lineal multivariado donde las $K$ variables dependientes representan a las $K$ categorías usando one-hot encoding. Es decir, el modelo tiene $M$ predictores y $K$ predicciones, una para cada clase. La clasificación se hace asignando la clase que tiene el valor máximo. Como medida de la confianza del resultado, se toma la razón entre ese valor máximo y la suma de todos los valores asignados a cada clase)
 
-La partición del espacio $\mathbb{R}^2$ elegido usando el resultado del clasificador cuadrático se muestra en la Figura \@ref(fig:cuadratico). Dado que el clasificador es lineal, las divisiones entre categorías son rectas que se intersectan en un punto central. 
+La partición del espacio $\mathbb{R}^2$ elegido usando el resultado del clasificador cuadrático se muestra en la Figura \@ref(fig:cuadratico). Dado que el clasificador es lineal, las divisiones entre categorías son rectas que se interceptan en un punto central. 
 
 ```{r}
 clasificador_cuadratico <- function(formula, data = environment(formula)) { 
@@ -168,7 +211,7 @@ predict.cuadratico <- function(object, newdata, prediction = c("level", "confide
 ```
 
 
-```{r cuadratico, fig.cap = "Clasificación en base a clasificador cuadrático. \"Precisión\" se define como la proporción de observaciones clasificadas como una determinada especie que fueron clasificadas correctamente, \"Exhaustividad\" se define como la proporción de observaciones de cada especie correctamente clasificadas."}
+```{r cuadratico, fig.cap = "Clasificación en base a clasificador cuadrático lineal. En contornos negros, el nivel de confianza del modelo. \"Precisión\" se define como la proporción de observaciones clasificadas como una determinada especie que fueron clasificadas correctamente, \"Exhaustividad\" se define como la proporción de observaciones de cada especie correctamente clasificadas."}
 W <- clasificador_cuadratico(z ~ x + y, data)
 
 data$pred <- predict(W, data)
@@ -177,6 +220,10 @@ div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 140),
                    y = seq(min(data$y), max(data$y), length.out = 140))
 
 div$pred <- predict(W, div)
+
+div$conf <- as.matrix(as.data.frame(predict(W, div, prediction = "confidence"))) %>% 
+  apply(1, function(x) max(x)/sum(x))
+
 data[] %>% 
   copy() %>% 
   .[, correct := pred == z] %>% 
@@ -194,12 +241,14 @@ medidas <- paste0("Precisión = ", precision, "\nExhaustividad = ", exhaustivida
 
 
 ggplot(data, aes(x, y)) +
-  geom_raster(aes(fill = pred), data = div, alpha = 0.4) +
+  geom_raster(aes(fill = pred, alpha = conf), data = div) +
+  geom_contour(aes(z = conf, alpha = ..level.., color = pred), data = div, size = 0.2) +
+  scale_alpha_continuous(range = c(0.1, 0.4), guide = "none") +
   geom_point(aes(color = z)) +
-  annotate(shadowtext:::GeomShadowText, 
-           label = medidas, 
-           x = c(32, 59, 59),
-           y = c(21, 13.5, 20), 
+  annotate(shadowtext:::GeomShadowText,
+           label = medidas,
+           x = c(175, 230, 215),
+           y = c(5500, 4000, 3000),
            color = pen_cols[c(1, 3, 2)],
            hjust = c(0, 1, 1),
            vjust = c(1, 0, 0),
@@ -207,142 +256,22 @@ ggplot(data, aes(x, y)) +
            family = hrbrthemes::font_rc_light) +
   scale_color_penguin +
   ejes +
-  coord_fixed(2) +
+  # coord_fixed(2) +
   theme(legend.position = "bottom")
 ```
 
-Se muestran dos medidas de la clasificación para cada especie. "Exhaustividad" es la proporción de observaciones que son clasificadas como una especie de forma correcta. "Precisión" es la proporción de observaciones de una determinada especie que son clasificadas correctamente. Es decir, la exhaustividad  del 100% para los pingüinos adelaida implica que la probabilidad de que un pingüino adelaida sea correctamente clasificado es del 100%. Sin embargo, la precisión del 92% implica que si el modelo clasifica un pingüino como adelaida, hay un 92% de probabilidad de que haya sido clasificado correctamente. 
+Se muestran dos medidas de la clasificación para cada especie. "Exhaustividad" es la proporción de observaciones que son clasificadas como una especie de forma correcta. "Precisión" es la proporción de observaciones de una determinada especie que son clasificadas correctamente. Es decir, la exhaustividad  del 100% para los pingüinos juanitos implica que la probabilidad de que un pingüino juanito sea correctamente clasificado es del 100%. Sin embargo, la precisión del 80% implica que si el modelo clasifica un pingüino como juanito, hay un 80% de probabilidad de que haya sido clasificado correctamente. 
+Se puede ver que si bien el clasificador lineal cuadrático identifica sin problemas a los pingüinos juanito, la separación entre adelaida y barbijo no es para nada buena. 
 
-Comparando estas medidas entre los pingüinos adelaida y barbijo se ilustra el balance entre ambas medidas. Una alta exhaustividad suele significar baja precisión y viceversa. 
-
-
-
-```{r, fig.height=9, fig.width=6}
-density2d <- function(x, y, group, bandiwdths, ...) {
-  xy <- na.omit(data.table(x, y, group))
-  xy_scaled <- scale(xy[, c("x", "y")])
-  center <- attr(xy_scaled, "scaled:center")
-  sd <- attr(xy_scaled, "scaled:scale")
-  
-  lims <- c(apply(xy_scaled, 2, range))
-  
-  base_bandwidth <- mean(c(MASS::bandwidth.nrd(xy_scaled[, 1]),
-                           MASS::bandwidth.nrd(xy_scaled[, 2])))
-  
-  bandwidths <- bandiwdths*base_bandwidth
-  
-  xy_scaled <- as.data.table(xy_scaled)
-  xy_scaled$group <- xy$group
-  
-  density <- function(x, y, h) {  
-    d <- MASS::kde2d(x, y, h = h, lims = lims, n = 200)
-    dimnames(d$z) <-  list(x = d$x, 
-                           y = d$y)
-    res <- reshape2::melt(d$z)  
-    res$bandwidth <- h
-    res
-  }
-  
-  out <- xy_scaled[, rbindlist(lapply(bandwidths, function(h) density(x, y, h))), by = group]
-  
-  out[, x := x*sd[1] + center[1]]
-  out[, y := y*sd[2] + center[2]]
-  out[]
-}
-
-
-density <- data[, density2d(x, y, z, c(1/4, 1, 4))]
-
-ggplot(data, aes(x, y)) +
-  geom_raster(data = density[, .(z = group[which.max(value)]), by = .(x, y, bandwidth)],
-              aes(x, y, fill = z), alpha  = 0.4) +
-  geom_contour(data = density, aes(x, y, z = value, color = group), size = 0.3, alpha = 0.4) +
-  geom_point(aes(color = z), size = 0.1) +
-  scale_color_penguin +
-  ejes +
-  coord_fixed(2) +
-  guides(fill = "none", color = "none") +
-  facet_grid(bandwidth~., labeller = labeller(bandwidth = function(x) paste0("Ancho de banda = ",
-                                                                             signif(as.numeric(x), 3)))) 
-```
-
-
-
-## Fisher
-
-```{r}
-data_bk <- data
-```
-
-
-
-```{r}
-data <- data_bk
-formula <- z ~ x + y
-
-fischer <- function(group, ...) {
-  data <- cbind(data.table::data.table(group = group), 
-                data.table::data.table(...))
-  data <- na.omit(data)
-  
-  
-  data_split <- split(data, data$group, drop = TRUE)
-  
-  
-  means <- lapply(data_split, function(dat) {
-    X <- dat[, -1]
-    colMeans(X)
-  })
-  
-  
-  S <- lapply(seq_along(data_split), function(i) {
-    cov(as.matrix(data_split[[i]][, -1])) * (nrow(data_split[[i]]) - 1)
-  })
-  
-  W <- solve(Reduce("+", S)) %*% Reduce("-", means)
-  structure(.Data = W, 
-            class = "fischer",
-            levels = levels(data),
-            pred_names = colnames(data))
-}
-
-predict.fischer <- function(object, newdata) {
-  
-  data <- newdata[, attr(object, "pred_names", TRUE)]
-  proj <- as.matrix(data) %*% object
-  
-}
-
-```
-
-
-```{r}
-d <- data[z != "juanito"]
-
-f <- with(d, fischer(z, x, y))
-
-d$proj <- as.matrix(d[, .(x, y)]) %*% f
-
-```
-
-
-```{r}
-ggplot(d, aes(x, y)) +
-  geom_point(aes(color = z))
-
-ggplot(d, aes(proj)) +
-  geom_density(aes(color = z, fill = z), alpha = 0.5) +
-  geom_rug(aes(color = z)) +
-  scale_color_penguin 
-```
 
 ## Logística
 
-```{r}
+La función `logistica` realiza el ajuste logístico mediante un método iterativo. Soporta clasificación de múltiples clases usando el algoritmo de uno-vs-todos. Es decir, para $K$ clases genera $K$ modelos que dan la probabilidad de que una observación determinada pertenezca a la clase k-ésima o a cualquiera de las otras. La clasificación luego se hace tomando la clase que tiene la mayor probabilidad. Al igual que con el clasificador cuadrático, como medida de confianza del modelo se calcula la razón entre la probabilidad asignada a la clase ganadora y la suma de todas las probabilidades asignadas. 
+
+```{r define-logistic}
 sigmoid = function(x) {
   1 / (1 + exp(-x))
 }
-
 
 
 solve_sigmoid <- function(X, t, conv_tol = 1e-4, max_iter = 1e4) {
@@ -439,186 +368,157 @@ predict.logistica <- function(object,
     return(pred)
   })
 }
+```
 
 
-
+```{r logistica-lineal, fig.cap = "Convergencia del modelo logístico lineal. En contornos negros, el nivel de confianza del modelo."}
 model <- logistica(z ~ x + y, data = data)
 
+div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 90), 
+                   y = seq(min(data$y), max(data$y), length.out = 90))
+
+preds <- predict(model, div, type = "sigmoid")
+
+hist <- lapply(preds, function(p) {
+  d <- div
+  class <- max.col(p)
+  d$pred <- factor(colnames(p)[class], levels = attr(model, "levels"))
+  d$conf <- apply(as.matrix(p), 1, function(x) max(x)/sum(x))
+  d
+}) %>% 
+  rbindlist(idcol = "iter")
 
 
+ggplot(hist[iter == max(iter)], aes(x, y)) +
+  geom_raster(aes(fill = pred, group = 1, alpha = conf), interpolate = TRUE) +
+  geom_contour(aes(z = conf, alpha = ..level.., color = pred)) +
+  scale_alpha_continuous(range = c(0.1, 0.4), guide = "none") +
+  geom_point(aes(color = z), data = data) +
+  scale_color_penguin +
+  ejes +
+  labs(fill = "Especie", color = "Especie") +
+  theme(legend.position = "bottom")
+```
+
+La Figura \@ref(fig:logistica-lineal) muestra el resultado de la clasificación logística lineal. Al igual que con la Figura \@ref(fig:cuadratico), los límites de decisión son rectas dado qu eel modelo es linear en este espacio $\mathbb{R}^2$. La partición no es muy distinta de la partición usando el clasificador cuadrático. La Figura \@ref(fig:logistica-eliptica), en cambio, muestra el resultado del modelo logístico pero aplicado al espacio de dimensión 4 $(x, y, x^2, y^2, xy)$. Al tener términos no lineales, los límites de decisión ahora pueden ser curvos^[Son curvos en el espacio $\mathbb{R}^2$ mostrado, en el espacio de dimensión 4, siguen siendo rectas.]
+
+```{r logistica-eliptica, fig.cap = "Igual que la Figura \\@ref(fig:logistica-lineal) pero para un ajuste elíptico."}
+model <- logistica(z ~ poly(x, y, degree = 2, raw = TRUE), data = data)
 
 div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 90), 
                    y = seq(min(data$y), max(data$y), length.out = 90))
 
-preds <- predict(model, div, type = "sigmoid", n = seq_along(model))
+preds <- predict(model, div, type = "sigmoid")
 
 
 hist <- lapply(preds, function(p) {
   d <- div
   class <- max.col(p)
   d$pred <- factor(colnames(p)[class], levels = attr(model, "levels"))
-  d$conf <- apply(as.matrix(p), 1, max)
+  d$conf <- apply(as.matrix(p), 1, function(x) max(x)/sum(x))
   d
 }) %>% 
   rbindlist(idcol = "iter")
 
 
-ggplot(hist, aes(x, y)) +
+ggplot(hist[iter == max(iter)], aes(x, y)) +
   geom_raster(aes(fill = pred, group = 1, alpha = conf), interpolate = TRUE) +
+  geom_contour(aes(z = conf, alpha = ..level.., color = pred)) +
   scale_alpha_continuous(range = c(0.1, 0.4), guide = "none") +
   geom_point(aes(color = z), data = data) +
   scale_color_penguin +
   ejes +
   labs(fill = "Especie", color = "Especie") +
-  coord_fixed(2) +
-  gganimate::transition_states(iter, state_length = 0) +
-  labs(subtitle = "Iteración: {previous_state}") +
   theme(legend.position = "bottom")
 ```
 
-```{r}
 
-# data_elip <- data
-# data_elip$z <- factor(data$z == "barbijo")
-
-model <- logistica(z ~ x + y + I(x^2) + I(y^2) + I(x*y), data = data)
-
-
-
-div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 90), 
-                   y = seq(min(data$y), max(data$y), length.out = 90))
-
-preds <- predict(model, div, type = "sigmoid", n = seq_along(model))
-
-
-hist <- lapply(preds, function(p) {
-  d <- div
-  class <- max.col(p)
-  d$pred <- factor(colnames(p)[class], levels = attr(model, "levels"))
-  d$conf <- apply(as.matrix(p), 1, max)
-  d
-}) %>% 
-  rbindlist(idcol = "iter")
-
-
-ggplot(hist, aes(x, y)) +
-  geom_raster(aes(fill = pred, group = 1, alpha = conf), interpolate = TRUE) +
-  scale_alpha_continuous(range = c(0.1, 0.4), guide = "none") +
-  geom_point(aes(color = z), data = data) +
-  scale_color_penguin +
-  ejes +
-  labs(fill = "Especie", color = "Especie") +
-  coord_fixed(2) +
-  gganimate::transition_states(iter, state_length = 0) +
-  labs(subtitle = "Iteración: {previous_state}") +
-  theme(legend.position = "bottom")
-```
 
 
 # Expectation Maximisation
 
+Expectation maximisation (EM) es una técnica no supervisada, es decir, que no tiene en cuenta las clases observadads. 
 
 ```{r}
-# datos falsos
-# set.seed(12314)
-k = 3
-ks <- seq_len(k)
-M <- 2
-real_mu <- lapply(ks, function(x) rnorm(M, sd = 4))
-real_sigma <- lapply(ks, function(x) {
-  A <- matrix(rnorm(4), nrow = M)
-  A <- t(A) %*% A
-  A/(A[1, 1] + A[2, 2])
-})
-
-datos <- lapply(seq_len(k), function(i) {
-  as.data.table(mvtnorm::rmvnorm(floor(runif(1, 50, 70)), mean = real_mu[[i]], sigma = real_sigma[[i]]))
-}) %>% 
-  rbindlist(idcol = "k") %>% 
-  setnames(c("V1", "V2"), c("x", "y"))
-ggplot(datos, aes(x, y)) +
-  geom_point(aes(color = factor(k)))
-```
-
-
-
-```{r}
-
-data_scaled <- as.data.table(scale(data[, .(x, y)]))
-data_scaled$z <- data$z
-# EM <- function() {
-tol <- 1e-6
-n_iter <- 1e5
-
-
-k <- 3 # cantidad de clases
-ks <- seq_len(k)
-M <- 2 # cantidad de features
-N <- nrow(data) # cantidad de obs
-D <- as.matrix(data_scaled[, .(x, y)])
-
-pi <- rep(1/k, k)
-mu <- lapply(ks, function(x) rnorm(M))
-sigma <- lapply(ks, function(x) diag(1/k^2, nrow = M))
-log_ver <- Inf
-h <- log_ver
-resp_hist <- list()
-mu_hist <- list()
-sigma_hist <- list()
-distr_hist <- list()
-
-for (iter in seq_len(n_iter)) {
-  resp <- lapply(ks, function(i) {
-    pi[[i]]*mvtnorm::dmvnorm(D, mean = mu[[i]], sigma = sigma[[i]])
-  })
+EM <- function(data, k, n_iter = 1e5, tol = 1e-6) {
+  # k <- 3 # cantidad de clases
+  ks <- seq_len(k)
+  M <- ncol(data) # cantidad de features
+  N <- nrow(data) # cantidad de obs
+  D <- scale(as.matrix(data))
   
-  resp_norm <- Reduce("+", resp)
-  resp <- lapply(ks, function(i) resp[[i]]/resp_norm)
+  center <- attr(D, "scaled:center")
+  sd <- attr(D, "scaled:scale")
   
-  resp_hist[[iter]] <- lapply(resp, function(r) {
-    d <- data_scaled
-    d$resp <- r
-    d}) %>% 
-    rbindlist(idcol = "class") 
+  pi <- rep(1/k, k)
+  mu <- lapply(ks, function(x) rnorm(M))
+  sigma <- lapply(ks, function(x) diag(1/k^2, nrow = M))
+  log_ver <- Inf
+  h <- log_ver
+  # resp_hist <- list()
+  mu_hist <- list()
+  sigma_hist <- list()
+  distr_hist <- list()
   
   
-  
-  Nk <- unlist(lapply(ks, function(i) sum(resp[[i]])))
-  pi <- Nk/N
-  mu <- lapply(ks, function(i) colSums(D * resp[[i]])/Nk[[i]])
-  sigma <- lapply(ks, function(i) t(D - mu[[i]]) %*% ( (D - mu[[i]]) * resp[[i]] )/Nk[[i]])
-  
-  distr_hist[[iter]] <- lapply(ks, function(i) {
-    list(sigma = sigma[[i]],
-         mu = mu[[i]])})
-  mu_hist[[iter]] <- as.data.table(transpose(mu))[, class := 1:.N]
-  sigma_hist[[iter]] <- sigma
-  
-  log_ver_new <- lapply(ks, function(i) {
-    pi[[i]]*mvtnorm::dmvnorm(D, mean = mu[[i]], sigma = sigma[[i]])
-  }) %>% 
-    Reduce("+", .) %>% 
-    log() %>% 
-    sum()
-  
-  
-  h <- c(h, log_ver_new)
-  
-  converged <- abs((log_ver - log_ver_new)/(log_ver_new)) <= tol
-  
-  if (converged) {
-    break
+  for (iter in seq_len(n_iter)) {
+    resp <- lapply(ks, function(i) {
+      pi[[i]]*mvtnorm::dmvnorm(D, mean = mu[[i]], sigma = sigma[[i]])
+    })
+    
+    resp_norm <- Reduce("+", resp)
+    resp <- lapply(ks, function(i) resp[[i]]/resp_norm)
+    
+    # resp_hist[[iter]] <- lapply(resp, function(r) {
+    #   d <- data
+    #   d$resp <- r
+    #   d}) %>% 
+    #   rbindlist(idcol = "class") 
+    
+    
+    Nk <- unlist(lapply(ks, function(i) sum(resp[[i]])))
+    pi <- Nk/N
+    mu <- lapply(ks, function(i) colSums(D * resp[[i]])/Nk[[i]])
+    sigma <- lapply(ks, function(i) t(D - mu[[i]]) %*% ( (D - mu[[i]]) * resp[[i]] )/Nk[[i]])
+    
+    distr_hist[[iter]] <- lapply(ks, function(i) {
+      list(sigma = sigma[[i]]*(sd %*% t(sd)),
+           mu = mu[[i]]*sd + center )})
+    
+    mu_hist[[iter]] <- as.data.table(transpose(mu))[, class := 1:.N]
+    sigma_hist[[iter]] <- sigma
+    
+    log_ver_new <- lapply(ks, function(i) {
+      pi[[i]]*mvtnorm::dmvnorm(D, mean = mu[[i]], sigma = sigma[[i]])
+    }) %>% 
+      Reduce("+", .) %>% 
+      log() %>% 
+      sum()
+    
+    
+    h <- c(h, log_ver_new)
+    
+    converged <- abs((log_ver - log_ver_new)/(log_ver_new)) <= tol
+    
+    if (converged) {
+      break
+    }
+    log_ver <- log_ver_new
   }
-  log_ver <- log_ver_new
+  structure(.Data = distr_hist, 
+            center = center,
+            sd = sd)
 }
-
-
 # }
 
 ```
 
 
-```{r}
+
+```{r em-pinguinos, fig.cap = "Media y elipse normal "}
+set.seed(123)
+distr_hist <- EM(data[, .(x, y)], k = 3)
+
 elipses <- lapply(distr_hist, function(i) {
   lapply(i, function(k) {
     as.data.table(ellipse::ellipse(k$sigma, centre = k$mu))
@@ -627,25 +527,126 @@ elipses <- lapply(distr_hist, function(i) {
 }) %>% 
   rbindlist(idcol = "iter")
 
-data_scaled %>% 
+centers <- lapply(distr_hist, function(i) {
+  lapply(i, function(k) {
+    # browser()
+    k$mu
+  }) %>% 
+    do.call(rbind, .) %>% 
+    as.data.table() %>% 
+    .[, class := 1:.N] %>% 
+    .[]
+}) %>% 
+  rbindlist(idcol = "iter")
+
+ultimo <- distr_hist[[length(distr_hist)]]
+
+div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 140), 
+                   y = seq(min(data$y), max(data$y), length.out = 140))
+density <- lapply(ultimo, function(k) {
+  mvtnorm::dmvnorm(as.matrix(div), mean = k$mu, sigma = k$sigma)
+})
+
+div$conf <- apply(as.matrix(as.data.table(density)), 1, function(x) max(x)/sum(x))
+div$pred <- factor(max.col(as.matrix(as.data.table(density))))
+
+
+
+div %>% 
   ggplot(aes(x, y)) +
-  geom_point(aes(color = factor(z))) +
-  geom_path(data = elipses, aes(x, y, group = class)) +
-  geom_point(data = rbindlist(mu_hist, idcol = "iter"),
-             aes(V1, V2), size = 3) +
-  scale_color_viridis_d() +
-  gganimate::transition_states(iter) +
-  labs(caption = "Iteración: {previous_state}")
+  geom_raster(aes(fill = pred, group = 1, alpha = conf), interpolate = TRUE) +
+  geom_contour(aes(z = conf, alpha = ..level.., color = pred)) +
+  scale_alpha_continuous(range = c(0.1, 0.4), guide = "none") +
+  
+  geom_path(data = elipses[iter == max(iter)],
+            aes(group = class, color = factor(class))) +
+  geom_point(data = centers[iter == max(iter)], aes(color = factor(class)), size = 3) +
+  
+  scale_fill_brewer("k", palette = "Set2") +
+  scale_color_brewer("k", palette = "Set2") +
+  
+  ggnewscale::new_scale("color") +
+  ggnewscale::new_scale("fill") +
+  
+  geom_point(data = data, aes(color = factor(z))) +
+  
+  ejes +
+  labs(x = NULL) +
+  scale_color_penguin +
+  theme(legend.position = "bottom")
+```
+La Figura \@ref(fig:em-pinguinos) muestra el resultado del algoritmo de EM con los datos de pingüinos con 2 clases. Los puntos son las medias de las distribuciones normales y las elipses marcan la el cuartil del 95%. Escala de colores de las 3 clases y las 3 especies no son las mismmas ya que no hay concordancia entre ambas necesariamente. El espacio se particiona entre las 3 clases a partir de la densidad de probabilidad normal de cada clase encontrada por EM y tomando la clase que maximiza la misma. 
+
+La clase 3 (celeste) coincide bien con los pingüinos juanito, ya que éstos se separan bien del resto, pero las clases 1 y 2 no representan bien las especies adelaida y barbijo. 
+
+
+## Fisher
+
+```{r}
+data_bk <- data
+```
+
+
+
+```{r}
+data <- data_bk
+formula <- z ~ x + y
+
+fischer <- function(group, ...) {
+  data <- cbind(data.table::data.table(group = group), 
+                data.table::data.table(...))
+  data <- na.omit(data)
+  
+  
+  data_split <- split(data, data$group, drop = TRUE)
+  
+  
+  means <- lapply(data_split, function(dat) {
+    X <- dat[, -1]
+    colMeans(X)
+  })
+  
+  
+  S <- lapply(seq_along(data_split), function(i) {
+    cov(as.matrix(data_split[[i]][, -1])) * (nrow(data_split[[i]]) - 1)
+  })
+  
+  W <- solve(Reduce("+", S)) %*% Reduce("-", means)
+  structure(.Data = W, 
+            class = "fischer",
+            levels = levels(data),
+            pred_names = colnames(data))
+}
+
+predict.fischer <- function(object, newdata) {
+  
+  data <- newdata[, attr(object, "pred_names", TRUE)]
+  proj <- as.matrix(data) %*% object
+  
+}
+
 ```
 
 
 ```{r}
-# data_scaled %>% 
-#   ggplot(aes(x, y)) +
-#   geom_point(aes(color = resp)) +
-#   coord_equal()
+d <- data[z != "juanito"]
+
+f <- with(d, fischer(z, x, y))
+
+d$proj <- as.matrix(d[, .(x, y)]) %*% f
+
 ```
 
+
+```{r}
+ggplot(d, aes(x, y)) +
+  geom_point(aes(color = z))
+
+ggplot(d, aes(proj)) +
+  geom_density(aes(color = z, fill = z), alpha = 0.5) +
+  geom_rug(aes(color = z)) +
+  scale_color_penguin 
+```
 
 
 # Referencias
