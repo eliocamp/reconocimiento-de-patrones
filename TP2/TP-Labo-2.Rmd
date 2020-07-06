@@ -2,13 +2,14 @@
 title: "TP2 - Reconocimiento de Patrones"
 author: "Elio Campitelli"
 output: 
-  bookdown::tufte_html2:
-    default
+  bookdown::tufte_handout2:
+    keep_tex: yes
+    toc: no
 bibliography: bibliography.bib
 biblio-style: apalike-es
 ---
 
-```{r setup, include = FALSE}
+```{r setup, include = FALSE, tidy = FALSE}
 library(ggplot2)
 library(data.table)
 library(magrittr)
@@ -21,8 +22,9 @@ theme_set(ggthemes::theme_tufte(base_size = 14) +
             theme(plot.background = element_rect(fill = "#FEFFF8", colour = NA))
           
 )
-knitr::opts_chunk$set(tidy = FALSE, message = FALSE, warning = FALSE, 
-                      cache = TRUE, cache.extra = 1, echo = FALSE)
+knitr::opts_chunk$set(tidy = FALSE, message = FALSE, warning = FALSE, tidy = FALSE,
+                      dev = "cairo_pdf",
+                      cache = TRUE, cache.extra = 42, echo = FALSE)
 
 label_null <- as_labeller(function(x) "")
 
@@ -48,7 +50,7 @@ setnames(penguins, colnames(penguins), c("especie", "culmen_longitud", "culmen_a
 
 # Datos
 
-En este TP voy a estar usando la base de datos `penguins` del paquete de R **palmerpenguins** [@R-palmerpenguins]. Los datos recolectados por la Dra. Kristen Gorman en la Estación Palmer, consisten en mediciones de la longitud del culmen^[El culmen es la parte superior del pico de las aves ![](culmen_depth.png)], alto del culmen y la masa corporal de `r nrow(penguins)` pingüinos de las especies *Pygoscelis adeliae* (Pingüino de Adelaida), *Pygoscelis papua* (Pingüino Juanito), y *Pygoscelis antarcticus* (Pingüino barbijo).
+En este TP voy a estar usando la base de datos `penguins` del paquete de R **palmerpenguins** [@R-palmerpenguins]. Los datos recolectados por la Dra. Kristen Gorman en la Estación Palmer, consisten en mediciones de la longitud del culmen^[El culmen es la parte superior del pico de las aves. `r knitr::include_graphics("culmen_depth.png", dpi = 1500)`], alto del culmen y la masa corporal de `r nrow(penguins)` pingüinos de las especies *Pygoscelis adeliae* (Pingüino de Adelaida), *Pygoscelis papua* (Pingüino Juanito), y *Pygoscelis antarcticus* (Pingüino barbijo).
 
 ```{r, fig.align="center", out.width="80%"}
 knitr::include_graphics("penguins.png")
@@ -97,7 +99,7 @@ ejes <- list(labs(x = x, y = y, fill = z, color = z))
 
 
 
-```{r densidad, fig.cap = "Separación del espacio a partir de estimar la densidad con un kernel gausiano de distintos anchos de banda."}
+```{r densidad, fig.cap = "Separación del espacio a partir de estimar la densidad con un kernel gausiano de distintos anchos de banda.", fig.height = 10}
 density2d <- function(x, y, group, bandiwdths, ...) {
   xy <- na.omit(data.table(x, y, group))
   xy_scaled <- scale(xy[, c("x", "y")])
@@ -131,18 +133,17 @@ density2d <- function(x, y, group, bandiwdths, ...) {
 }
 
 
-density <- data[, density2d(x, y, z, c(1/4, 1, 4, 10))]
+density <- data[, density2d(x, y, z, c(1/4, 1, 8))]
 
+div <- density[, .(z = group[which.max(value)], 
+                   conf = max(value)/sum(value)), 
+               by = .(x, y, bandwidth)]
 ggplot(data, aes(x, y)) +
-  geom_raster(data = density[, .(z = group[which.max(value)], 
-                                 conf = max(value)/sum(value)), 
-                             by = .(x, y, bandwidth)],
+  geom_raster(data = div,
               aes(x, y, fill = z, alpha = conf)) +
-  geom_contour(data = density[, .(z = group[which.max(value)], 
-                                  conf = max(value)/sum(value)), 
-                              by = .(x, y, bandwidth)],
+  geom_contour(data = div,
                aes(x, y, z = conf, color = z, alpha = ..level..)) +
-  scale_alpha_continuous(range = c(0.1, 0.4), guide = "none") +
+  scale_alpha_continuous(range = c(0.1, 0.6), guide = "none") +
   # metR::geom_contour2(data = density, aes(x, y, z = value, color = group), global.breaks = FALSE,
   #                     size = 0.3, alpha = 0.4) +
   geom_point(aes(color = z), size = 0.1) +
@@ -150,7 +151,7 @@ ggplot(data, aes(x, y)) +
   ejes +
   # coord_fixed(2) +
   # guides(fill = "none", color = "none") +
-  facet_wrap(bandwidth~., ncol = 2, labeller = labeller(bandwidth = function(x) paste0("Ancho de banda = ",
+  facet_wrap(bandwidth~., ncol = 1, labeller = labeller(bandwidth = function(x) paste0("Ancho de banda = ",
                                                                                        signif(as.numeric(x), 3))))  +
   theme(legend.position = "bottom")
 ```
@@ -211,7 +212,7 @@ predict.cuadratico <- function(object, newdata, prediction = c("level", "confide
 ```
 
 
-```{r cuadratico, fig.cap = "Clasificación en base a clasificador cuadrático lineal. En contornos negros, el nivel de confianza del modelo. \"Precisión\" se define como la proporción de observaciones clasificadas como una determinada especie que fueron clasificadas correctamente, \"Exhaustividad\" se define como la proporción de observaciones de cada especie correctamente clasificadas."}
+```{r cuadratico, fig.cap = "Clasificación en base a clasificador cuadrático lineal. En contornos negros, el nivel de confianza del modelo. \"Precisión\" se define como la proporción de observaciones clasificadas como una determinada especie que fueron clasificadas correctamente, \"Exhaustividad\" se define como la proporción de observaciones de cada especie correctamente clasificadas.", fig.height=5, fig.width=6}
 W <- clasificador_cuadratico(z ~ x + y, data)
 
 data$pred <- predict(W, data)
@@ -239,7 +240,6 @@ data[] %>%
 
 medidas <- paste0("Precisión = ", precision, "\nExhaustividad = ", exhaustividad)
 
-
 ggplot(data, aes(x, y)) +
   geom_raster(aes(fill = pred, alpha = conf), data = div) +
   geom_contour(aes(z = conf, alpha = ..level.., color = pred), data = div, size = 0.2) +
@@ -252,7 +252,7 @@ ggplot(data, aes(x, y)) +
            color = pen_cols[c(1, 3, 2)],
            hjust = c(0, 1, 1),
            vjust = c(1, 0, 0),
-           bg.r = 0.20, bg.color = "#FEFFF8", size = 4.5,
+           bg.r = 0.20, bg.color = "#FEFFF8", size = 4,
            family = hrbrthemes::font_rc_light) +
   scale_color_penguin +
   ejes +
@@ -371,7 +371,7 @@ predict.logistica <- function(object,
 ```
 
 
-```{r logistica-lineal, fig.cap = "Convergencia del modelo logístico lineal. En contornos negros, el nivel de confianza del modelo."}
+```{r logistica-lineal, fig.cap = "Convergencia del modelo logístico lineal. En contornos negros, el nivel de confianza del modelo.", fig.height=5, fig.width=6}
 model <- logistica(z ~ x + y, data = data)
 
 div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 90), 
@@ -402,7 +402,7 @@ ggplot(hist[iter == max(iter)], aes(x, y)) +
 
 La Figura \@ref(fig:logistica-lineal) muestra el resultado de la clasificación logística lineal. Al igual que con la Figura \@ref(fig:cuadratico), los límites de decisión son rectas dado qu eel modelo es linear en este espacio $\mathbb{R}^2$. La partición no es muy distinta de la partición usando el clasificador cuadrático. La Figura \@ref(fig:logistica-eliptica), en cambio, muestra el resultado del modelo logístico pero aplicado al espacio de dimensión 4 $(x, y, x^2, y^2, xy)$. Al tener términos no lineales, los límites de decisión ahora pueden ser curvos^[Son curvos en el espacio $\mathbb{R}^2$ mostrado, en el espacio de dimensión 4, siguen siendo rectas.]
 
-```{r logistica-eliptica, fig.cap = "Igual que la Figura \\@ref(fig:logistica-lineal) pero para un ajuste elíptico."}
+```{r logistica-eliptica, fig.cap = "Igual que la Figura  pero para un ajuste elíptico.", fig.height=5, fig.width=6}
 model <- logistica(z ~ poly(x, y, degree = 2, raw = TRUE), data = data)
 
 div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 90), 
@@ -548,7 +548,7 @@ augment_em <- function(distr_hist, data) {
 ```
 
 
-```{r em-pinguinos, fig.cap = "Medias y elipses normales representando el cuantil del 95% para los clusters identificados por Expectation Maximisation con k = 2 (izquierda) y k = 3 (derecha)."}
+```{r em-pinguinos, fig.cap = "Medias y elipses normales representando el cuantil del 95\\% para los clusters identificados por Expectation Maximisation con k = 2 (izquierda) y k = 3 (derecha).", fig.width = 10, fig.height = 6, fig.fullwidth = TRUE}
 set.seed(123)
 
 em3 <- augment_em(EM(data[, .(x, y)], k = 3), data)
@@ -593,73 +593,5 @@ div %>%
 La Figura \@ref(fig:em-pinguinos) muestra los resultados del algoritmo de EM con los datos de pingüinos con 2 y 3 clases respectivamente. Los puntos son las medias de las distribuciones normales y las elipses marcan la el cuartil del 95%. Escala de colores de las clases de EM y las 3 especies no son las mismmas ya que no hay concordancia entre ambas necesariamente. El espacio se particiona entre las clases a partir de la densidad de probabilidad normal de cada clase encontrada por EM y tomando la clase que maximiza la misma. 
 
 La parciticón con 2 clases separa correctmaente los pingüinos juanito de las otras dos especies. La partición con 3 clases, en cambio, identifica el *cluster* de los pingüinos juanito, pero no hay separación entre los otras dos especies. 
-
-## Fisher
-
-```{r}
-data_bk <- data
-```
-
-
-
-```{r}
-data <- data_bk
-formula <- z ~ x + y
-
-fischer <- function(group, ...) {
-  data <- cbind(data.table::data.table(group = group), 
-                data.table::data.table(...))
-  data <- na.omit(data)
-  
-  
-  data_split <- split(data, data$group, drop = TRUE)
-  
-  
-  means <- lapply(data_split, function(dat) {
-    X <- dat[, -1]
-    colMeans(X)
-  })
-  
-  
-  S <- lapply(seq_along(data_split), function(i) {
-    cov(as.matrix(data_split[[i]][, -1])) * (nrow(data_split[[i]]) - 1)
-  })
-  
-  W <- solve(Reduce("+", S)) %*% Reduce("-", means)
-  structure(.Data = W, 
-            class = "fischer",
-            levels = levels(data),
-            pred_names = colnames(data))
-}
-
-predict.fischer <- function(object, newdata) {
-  
-  data <- newdata[, attr(object, "pred_names", TRUE)]
-  proj <- as.matrix(data) %*% object
-  
-}
-
-```
-
-
-```{r}
-d <- data
-d$z <- d$z == "juanito"
-f <- with(d, fischer(z, x, y))
-
-d$proj <- as.matrix(d[, .(x, y)]) %*% f
-
-```
-
-
-```{r}
-ggplot(d, aes(x, y)) +
-  geom_point(aes(color = z)) 
-
-ggplot(d, aes(-proj)) +
-  geom_density(aes(color = z, fill = z), alpha = 0.5) +
-  geom_rug(aes(color = z)) 
-```
-
 
 # Referencias

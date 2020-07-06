@@ -1,0 +1,7 @@
+\contentsline {section}{\numberline {1}Datos}{1}{section.1}
+\contentsline {section}{\numberline {2}Clasificador cuadr\IeC {\'a}tico}{2}{section.2}
+\contentsline {subsection}{\numberline {2.1}Log\IeC {\'\i }stica}{4}{subsection.2.1}
+\contentsline {section}{\numberline {3}Expectation Maximisation}{5}{section.3}
+\contentsline {subsection}{\numberline {3.1}Fisher}{7}{subsection.3.1}
+\contentsline {section}{Referencias}{7}{subsection.3.1}
+\contentsfinish 
