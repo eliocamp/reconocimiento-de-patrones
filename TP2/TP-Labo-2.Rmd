@@ -3,7 +3,6 @@ title: "TP2 - Reconocimiento de Patrones"
 author: "Elio Campitelli"
 output: 
   bookdown::tufte_handout2:
-    keep_tex: yes
     toc: no
 bibliography: bibliography.bib
 biblio-style: apalike-es
@@ -371,7 +370,7 @@ predict.logistica <- function(object,
 ```
 
 
-```{r logistica-lineal, fig.cap = "Convergencia del modelo logístico lineal. En contornos negros, el nivel de confianza del modelo.", fig.height=5, fig.width=6}
+```{r logistica-lineal, fig.cap = "Partición del espacio a partir del modelo logístico lineal. En contornos negros, el nivel de confianza del modelo.", fig.height=5, fig.width=6}
 model <- logistica(z ~ x + y, data = data)
 
 div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 90), 
@@ -402,7 +401,7 @@ ggplot(hist[iter == max(iter)], aes(x, y)) +
 
 La Figura \@ref(fig:logistica-lineal) muestra el resultado de la clasificación logística lineal. Al igual que con la Figura \@ref(fig:cuadratico), los límites de decisión son rectas dado qu eel modelo es linear en este espacio $\mathbb{R}^2$. La partición no es muy distinta de la partición usando el clasificador cuadrático. La Figura \@ref(fig:logistica-eliptica), en cambio, muestra el resultado del modelo logístico pero aplicado al espacio de dimensión 4 $(x, y, x^2, y^2, xy)$. Al tener términos no lineales, los límites de decisión ahora pueden ser curvos^[Son curvos en el espacio $\mathbb{R}^2$ mostrado, en el espacio de dimensión 4, siguen siendo rectas.]
 
-```{r logistica-eliptica, fig.cap = "Igual que la Figura  pero para un ajuste elíptico.", fig.height=5, fig.width=6}
+```{r logistica-eliptica, fig.cap = "Igual que la Figura 4 pero para un ajuste elíptico.", fig.height=5, fig.width=6}
 model <- logistica(z ~ poly(x, y, degree = 2, raw = TRUE), data = data)
 
 div <- expand.grid(x = seq(min(data$x), max(data$x), length.out = 90), 
