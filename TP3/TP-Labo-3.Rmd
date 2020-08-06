@@ -4,7 +4,6 @@ author: "Elio Campitelli"
 output: 
   bookdown::tufte_handout2:
     toc: no
-bibliography: bibliography.bib
 biblio-style: apalike-es
 ---
 
@@ -29,182 +28,14 @@ label_null <- as_labeller(function(x) "")
 
 
 update_geom_defaults(GeomPoint, list(size = 0.5))
+source(here::here("TP3", "functions.R"))
 set.seed(42)
 ```
 
 
+## SVM con separación lineal
 
-```{r}
-SVM <- function(formula, data = environment(formula), batch = 1, lambda = 0.1, 
-                epochs = 100, kernel = NULL) {
-  data <- model.frame(formula, data)
-  
-  y <- matrix((as.numeric(data[, 1])-1)*2 -1, ncol = 1)
-  
-  # datos de predictores
-  bare_data <- model.matrix(formula, data)[, -1]
-  bare_data_scaled <- scale(bare_data)
-  
-  center <- attr(bare_data_scaled, "scaled:center")
-  sd <- attr(bare_data_scaled, "scaled:scale")
-  
-  bare_data_scaled <- cbind(1, bare_data_scaled)
-  
-  if (is.null(kernel)) {
-    W <- pegasos(bare_data_scaled, y, batch = batch, lambda = lambda, epochs = epochs)  
-  } else {
-    W <- pegasos_kernel(bare_data_scaled, y, kernel = kernel, batch = batch, 
-                        lambda = lambda, epochs = epochs)  
-  }
-  attr(W, "levels") <- levels(data[[deparse(formula[[2]])]])
-  attr(W, "formula") <- formula
-  attr(W, "center") <- center
-  attr(W, "sd") <- sd
-  W
-}
-
-pegasos <- function(X, y, batch = 1, lambda = 0.1, epochs = 100) {
-  
-  W <- matrix(0, ncol = ncol(X), nrow = ncol(y))
-  # W[1, 1] <- 1
-  
-  for (e in seq_len(epochs)) {
-    nu <- 1/(lambda*e)
-    W_old <- W
-    for (i in seq_len(nrow(X))) {
-      example <- sample(nrow(X), batch)
-      pred <- W %*% t(X[example, , drop = FALSE])
-      greater_one <- as.numeric((y[example, ] * pred) < 1)
-      W <- (1 - 1/e)*W + colMeans(greater_one*nu*y[example, ]*X[example, ,drop = FALSE])
-    }
-  }
-  
-  structure(W, 
-            class = "svm_lineal")
-  
-}
-
-
-# https://people.csail.mit.edu/dsontag/courses/ml16/slides/lecture6_notes.pdf
-pegasos_kernel <- function(X, y, kernel = gauss_kern(1), 
-                           batch = 1, lambda = 0.1, epochs = 100) {
-  B <- rep(0, length = nrow(X))
-  
-  for (e in seq_len(epochs)[-1]) {
-    message(e)
-    for (i in seq_len(nrow(X))) {
-      example <- sample(nrow(X), batch)
-      
-      Xj <- X[example, , drop = FALSE]
-      
-      non_zero <- B != 0
-      
-      if (all(!non_zero)) {
-        K <- 0
-      } else {
-        K <- kernel(X[non_zero, , drop = FALSE], Xj)  
-      }
-      
-      
-      if (y[example, ]*1/(lambda*(e - 1))*sum(B[non_zero]*y[non_zero]*K) < 1) {
-        B[example] <- B[example] + 1
-      }
-      
-    }
-  }
-  
-  a <- 1/(lambda*epochs)*B
-  
-  structure(list(a = a[a != 0], 
-                 y = y[a != 0],
-                 X = X[a != 0, , drop = FALSE],
-                 kernel = kernel,
-                 SV = a != 0),
-            class = "svm_kernel")
-}
-
-
-
-predict.svm_kernel <- function(object, newdata, ...) {
-  formula <- attr(object, "formula", TRUE)
-  formula <- delete.response(terms(formula))
-  sd <- attr(object, "sd", TRUE)
-  center <- attr(object, "center", TRUE)
-  
-  bare_data <- as.matrix(model.frame(formula, newdata, na.action = NULL))
-  bare_data <- cbind(1, scale(bare_data, center = center, scale = sd))
-  
-  levels <- attr(object, "levels", TRUE)
-  
-  
-  Z <- apply(bare_data, 1, function(Xi) object$y*object$a*object$kernel(object$X, matrix(c(Xi), ncol = 3)))
-  
-  lev <- colSums(Z)
-  pred <- sign(lev)/2 + 1.5
-  
-  return(list(pred = factor(levels[pred], levels = levels), 
-              lev = lev))
-  
-}
-
-
-predict.svm_lineal <- function(object, newdata, ...) {
-  formula <- attr(object, "formula", TRUE)
-  formula <- delete.response(terms(formula))
-  sd <- attr(object, "sd", TRUE)
-  center <- attr(object, "center", TRUE)
-  
-  bare_data <- as.matrix(model.frame(formula, newdata, na.action = NULL))
-  bare_data <- cbind(1, scale(bare_data, center = center, scale = sd))
-  
-  levels <- attr(object, "levels", TRUE)
-  
-  lev <- bare_data %*% t(object)
-  pred <- sign(lev)/2 + 1.5
-  
-  return(list(pred = factor(levels[pred], levels = levels), 
-              lev = lev))
-}
-
-gauss_kernel <-  function(gamma) {
-  force(gamma)
-  
-  function(X, Y) {
-    Y <- rray::rray_broadcast(Y, dim(X))
-    Z <- X - Y
-    Z <- apply(Z, 1, norm, type = "2")
-    exp(-gamma * Z^2)
-  }
-}
-
-
-```
-
-```{r}
-predict_field <- function(model, x, y, n = 30) {
-  div <- data.table::CJ(x = seq(min(x), max(x), length.out = n), 
-                        y = seq(min(y), max(y), length.out = n))
-  
-  div[, c("pred", "lev") := predict(model, div)]
-  return(div)
-}
-
-```
-
-```{r}
-
-generate_data <- function(ns, mus, sigmas) {
-  
-  vals <- lapply(seq_along(ns), function(i) {
-    vals <- MASS::mvrnorm(ns[i], mus[[i]], sigmas[[i]])
-    vals <- data.table::as.data.table(vals)
-    colnames(vals) <-  c("x", "y")
-    return(vals)
-  })
-  rbindlist(vals, idcol = "id")[, id := factor(id)]
-}
-
-```
+Voy a implementar SVM usando soft-margin para datos sintéticos generados a partir de dos distribuciones normales bivariadas con $\Sigma^2=I$ y distintos grados de separación (\$\\delta \\in {1, 2, 4, 6}\$) en dirección x. La recta de separación óptima es una recta vertical centrada en cero.
 
 ```{r}
 deltas <- c(6, 4, 2, 1)
@@ -236,73 +67,89 @@ models[, delta_e := factor(paste0("delta == ", delta))]
 
 fields <- models[, predict_field(model[[1]], x = c(-5, 5), y = c(-3, 3), n = 30), 
                  by = .(lambda_e, delta_e)]
-
-ggplot(mapping = aes(x, y)) +
-  geom_point(aes(color = id), data = models[, data[[1]], by = .(lambda_e, delta_e)]) +
-  metR::geom_contour2(data = fields, aes(z = lev), color = "black", breaks = 0) + 
-  scale_color_brewer(palette = "Dark2") +
-  facet_grid(lambda_e ~ delta_e, 
-             labeller = labeller(lambda_e = label_parsed, delta_e = label_parsed))
 ```
 
 
-```{r}
-deltas <- c(2)
-names(deltas) <- deltas
-sims <- lapply(deltas, function(x) {
-  generate_data(ns = c(150, 150), 
-                mus = list(c(-x/2, 0), 
-                           c(x/2, 0)),
-                sigma= list(diag(1, 2), 
-                            diag(1, 2)))
-}) %>% 
-  rbindlist(idcol = "delta") %>% 
-  .[, delta := as.numeric(delta)]
+```{r deltas, fig.cap = "Límites de decisión para datos sintéticos con distintos grados de separación (columnas) y distinto nivel de tolerancia para datos mal clasificados (filas).", fig.height=3}
 
 
-lambdas <-  c(10, 1, 0.1, 0.001)
-gammas <- c( 1, 10, 50)
-params <- CJ(lambda = lambdas, 
-             gamma = gammas)
-
-models_k <- params[, .(model = list(SVM(id ~ x + y, data = sims,  epochs = 10, 
-                                      lambda = lambda,kernel = gauss_kernel(gamma)))), 
-                 by = .(lambda, gamma)]
-
-models_k[, lambda_e := factor(paste0("lambda == ", lambda))]
-models_k[, gamma_e := factor(paste0("gamma == ", gamma))]
-
-fields <- models_k[, predict_field(model[[1]], x = c(-5, 5), y = c(-3, 3), n = 40),
-                   by = .(lambda_e, gamma_e)]
-
-fields[, lev_r := scales::rescale(lev, to = c(-1, 1)), by = .(lambda_e, gamma_e)]
 ggplot(mapping = aes(x, y)) +
+  geom_contour_filled(aes(z = lev,  fill = sign(..level_mid..)),
+               data = fields, alpha = 0.4)  +
+  geom_point(aes(color = id), size = 0.2,
+             data = models[, data[[1]], by = .(lambda_e, delta_e)]) +
+  metR::geom_contour2(data = fields, aes(z = lev), color = "black", breaks = 0) + 
+  scale_color_brewer(palette = "Dark2", guide = "none") +
+  scale_fill_gradient2(low = "#1B9E77", high = "#D95F02", guide = "none") +
+  scale_x_continuous(NULL) +
+  scale_y_continuous(NULL) +
+  facet_grid(lambda_e ~ delta_e, 
+             labeller = labeller(lambda_e = label_parsed, delta_e = label_parsed)) 
+```
+
+En la Figura \ref{fig:deltas} se muestra el límite de decisión para los cuatro set se datos (columnas) y los grados de soft-margin donde un $\lambda$ pequeño equivale a poca tolerancia mientras que un lambda grande equivale a mucha tolerancia.
+
+Se ve que para datos muy separados el clasificador es poco sensible a la elección de hiperparámetro $\lambda$. Para datos poco separables  la elección de \$\\lambda\$ tiene gran impacto en el resultado.
+
+## SVM con kernel gaussiano
+
+Luego, extiendo el algoritmo PEGASOS para poder usar un kernel arbitrario. En la Figura \ref{fig:svm-gauss} se muestran los resultados de applicar SVM con kernel gaussiano con distintos valores de $\gamma$ y $\lambda$ y un $\delta = 2$. 
+
+```{r svm-gauss, fig.cap = "SVM con kernel gaussiano para distintos valores de $\\gamma$ y $\\lambda$. La separación entre los datos es $\\delta = 2$.", fig.height=6, fig.fullwidth = TRUE, fig.width=9}
+models_k <- readRDS(here::here("TP3", "models_r.Rds"))
+sims <- readRDS(here::here("TP3", "sims.Rds"))
+fields <- readRDS(here::here("TP3", "fields.Rds"))
+
+
+fields[, lev_r := lev/max(lev), by = .(lambda_e, gamma_e)] 
+
+
+ggplot(mapping = aes(x, y)) +
+  
+  geom_contour_filled(aes(z = lev_r,  fill = sign(..level_mid..)),
+               data = fields, alpha = 0.4)  +
   geom_point(aes(color = id), data = sims) +
-  metR::geom_contour2(aes(z = lev_r, color = factor(sign(..level..)/2 + 1.5)),
-               data = fields, breaks = metR::MakeBreaks(exclude = 0))  +
-  geom_contour(aes(z = lev_r), breaks = 0, color = "black",
+  geom_contour(aes(z = lev), breaks = 0, color = "black",
                data = fields)  +
-  scale_color_brewer(palette = "Dark2") +
+  scale_color_brewer(palette = "Dark2", guide = "none") +
+  scale_fill_gradient2(low = "#1B9E77", high = "#D95F02", guide = "none") +
   facet_grid(lambda_e ~ gamma_e, labeller = label_parsed)
 ```
 
+Estos datos sintéticos son un poco aburridos. Voy a usar los datos que se muestran en la Figura 7.2 del Bishop (Figura \ref{fig:bishop2} derecha). Digitalicé los datos y los usé para entrenar una SVM con kernel gausiano con $\gamma = 0.5$ y $\lambda = 0.1$. El resultado se muestra en la Figura \ref{fig:bishop2} izquierda, que es muy similar. 
+
+
 ```{r}
+set.seed(42)
 bishop <- fread(here::here("TP3", "bishiop7.2.csv")) %>% 
   melt(id.vars = c("x"), value.name = "y", variable = "id") %>% 
   .[, id := forcats::fct_recode(id, "1" = "Curve1", "2" = "Curve2")] %>% 
   na.omit() 
+bishop_svm <- SVM(id ~ x + y, data = bishop, lambda = 0.1, epochs = 300,
+                  kernel = gauss_kernel(0.5))
+
+field <- predict_field(bishop_svm, bishop$x, bishop$y, 40)
 ```
 
-```{r}
-bishop_svm <- SVM(id ~ x + y, data = bishop, lambda = 0.1, epochs = 50, kernel = gauss_kernel(1))
-field <- predict_field(bishop_svm, bishop$x, bishop$y, 30)
-ggplot(bishop, aes(x, y)) +
-  geom_contour(data = field, aes(z = lev), color = "black", size = 0.2) +
+```{r bishop2, fig.cap = "SVM con kernel gaussiano para los datos de la Figura 7.2 del Bishop. y(x) en líneas de contorno, y(x) = 0 en línea gruesa.A la derecha, la figura original, a la izquierda, el clasificador entrenado en este ejercicio", fig.height=4, fig.width=9, fig.fullwidth = TRUE, dependson=field}
+
+g <- ggplot(bishop, aes(x, y)) +
+  geom_contour(data = field, aes(z = lev), color = "black", size = 0.1) +
   geom_contour(data = field, aes(z = lev), color = "black", breaks = 0) +
-  geom_point(aes(color = id), shape = 4, size = 4) +
-  geom_point(data = bishop[bishop_svm$SV], shape = 21, size = 6, color = "green") +
+  # geom_contour(data = field, aes(z = lev), color = "black", breaks = c(-1, 1)) +
+  geom_point(aes(color = id), shape = 4, size = 2) +
+  geom_point(data = bishop[bishop_svm$SV], shape = 21, size = 4, color = "green") +
   scale_color_manual(guide = "none", values = c("1" = "blue", "2" = "red")) +
   scale_x_continuous(NULL, breaks = NULL) +
-  scale_y_continuous(NULL, breaks = NULL)
+  scale_y_continuous(NULL, breaks = NULL, expand = c(0.2, 0))
+
+p2 <- cowplot::ggdraw() +
+  cowplot::draw_image(here::here("TP3", "bishop_screncap.png"))
+
+cowplot::plot_grid(p2, g, labels = c("Bishop (7.2)", "Fit"))
 ```
 
+## Crossvalidation
+
+
+bablabl
