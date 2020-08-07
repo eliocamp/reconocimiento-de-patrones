@@ -4,6 +4,7 @@ author: "Elio Campitelli"
 output: 
   bookdown::tufte_handout2:
     toc: no
+    number_sections: no
 biblio-style: apalike-es
 ---
 
@@ -95,7 +96,7 @@ Se ve que para datos muy separados el clasificador es poco sensible a la elecci�
 
 Luego, extiendo el algoritmo PEGASOS para poder usar un kernel arbitrario. En la Figura \ref{fig:svm-gauss} se muestran los resultados de applicar SVM con kernel gaussiano con distintos valores de $\gamma$ y $\lambda$ y un $\delta = 3.5$. 
 
-```{r cv}
+```{r}
 set.seed(42)
 deltas <- c(3.5)
 names(deltas) <- deltas
@@ -173,11 +174,10 @@ cowplot::plot_grid(p2, g, labels = c("Bishop (7.2)", "Fit"))
 
 ## Crossvalidation
 
-La Figura \ref{fig:cv-fig} muestra la tasa de acierto (proporción de observaciones correctamente categorizadas) computada por validación cruzada para distintos valores de $\lambda$ y $\gamma$. 
 
 ```{r cv}
 lambdas <-  10^seq(-3, 2, by = 0.5)
-gammas <- 10^(seq(-2, 2, by = 0.5))
+gammas <- 10^(seq(-2, 2, by = 0.25))
 params <- CJ(lambda = lambdas, 
              gamma = gammas)
 
@@ -211,19 +211,26 @@ rmse_cv <- function(datos, k_fold = 10, lambda, gamma, epochs = 100) {
 
 reps <- 20
 positive <- lapply(seq_len(reps), function(i) params[, rmse_cv(datos, 10, lambda, gamma), by = .(lambda, gamma)]) %>% 
-  rbindlist()
+  rbindlist() %>% 
+  .[, mean(V1), by = .(lambda, gamma)]
+best <- positive[V1 == max(V1)]
 ```
 
-```{r cv-fig, fig.cap = "Acierto computado a partir de validación cruzada para distintos valores de $\\lambda$ y $\\gamma$"}
-positive[, mean(V1), by = .(lambda, gamma)] %>% 
+```{r cv-fig, fig.cap = "Acierto computado a partir de validación cruzada para distintos valores de $\\lambda$ y $\\gamma$", fig.height=4}
+positive %>% 
   copy() %>% 
   .[, c("dl", "dg") := metR::Derivate(V1 ~ log(lambda) + log(gamma), fill = TRUE)] %>% 
   ggplot(aes(gamma, lambda)) +
   metR::geom_contour_fill(aes(z = V1), bins = 20) +
   metR::geom_streamline(aes(dx = dg, dy = dl), res = 3, n = 10,
-                        L = 20, alpha = 0.5,
+                        L = 30, alpha = 0.5,
                         size = 0.05) +
   geom_point(alpha = 0.5, size = 0.1) +
+  geom_point(data = best, size = 1) +
+  ggrepel::geom_text_repel(data = best, parse = TRUE, bg.colour = "#DFE234", bg.r = 0.2,
+                           nudge_x = 0.3, nudge_y = 0.3,
+                           aes(label = paste0("gamma == ", signif(gamma, 2), 
+                                              "~~ lambda == ", lambda))) +
   scale_y_continuous(latex2exp::TeX("$\\lambda"), trans = scales::log10_trans(),
                      # breaks = unique(positive$lambda),
                      expand = c(0.01, 0)) +
@@ -231,19 +238,13 @@ positive[, mean(V1), by = .(lambda, gamma)] %>%
                      # breaks = unique(positive$gamma), 
                      trans = scales::log10_trans(), 
                      expand = c(0.01, 0)) +
-  scale_fill_viridis_c("Tasa de acierto")
-```
-Las mejores combinaciones)
-
-```{r}
-positive[V1 == max(V1)] %>% 
-  .[order(-lambda, gamma)]
+  scale_fill_viridis_c("Tasa de acierto") +
+  theme(legend.position = "bottom")
 
 ```
+La Figura \ref{fig:cv-fig} muestra la tasa de acierto (proporción de observaciones correctamente categorizadas) computada por validación cruzada para distintos valores de $\lambda$ y $\gamma$. La mejor combinación de hiperparámetros está marcada con un punto. En la Figura \ref{fig:field-best} se muestra el límite de decisión para la SVM ajustada con éstos. 
 
-```{r}
-
-
+```{r field-best, fig.cap = "SVM fiteada con los mejores valores de $\\lambda$ y $\\gamma$ elegidos por validación cruzada."}
 model <- SVM(id ~ x + y, data = datos, lambda = best$lambda, kernel = gauss_kernel(best$gamma), epochs = 100)
 
 field <- predict_field(model, c(-5, 5), c(-3, 3))
@@ -252,12 +253,10 @@ ggplot(mapping = aes(x, y)) +
   geom_contour_filled(aes(z = lev,  fill = sign(..level_mid..)),
                       data = field, alpha = 0.4)  +
   geom_point(aes(color = id), data = datos) +
+  geom_point(data = datos[model$SV], shape = 21, size = 3, color = "green") +
   geom_contour(aes(z = lev), breaks = 0, color = "black",
                data = field)  +
   scale_color_brewer(palette = "Dark2", guide = "none") +
   scale_fill_gradient2(low = "#1B9E77", high = "#D95F02", guide = "none") 
 ```
 
-
-
-bablabl
