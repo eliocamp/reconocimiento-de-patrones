@@ -4,7 +4,7 @@ library(magrittr)
 library(data.table)
 
 set.seed(42)
-deltas <- c(2)
+deltas <- c(3.5)
 names(deltas) <- deltas
 sims <- generate_data(ns = c(150, 150), 
                 mus = list(c(-deltas/2, 0), 
@@ -13,12 +13,12 @@ sims <- generate_data(ns = c(150, 150),
                             diag(1, 2)))
 
 
-lambdas <-  c(10, 1, 0.1)
-gammas <- c(0.1, 1, 10, 100)
+lambdas <-  c(10, 1, 0.1, 0.001)
+gammas <- c(0.01, 0.1, 1, 10, 100)
 params <- CJ(lambda = lambdas, 
              gamma = gammas)
 
-models_k <- params[, .(model = list(SVM(id ~ x + y, data = sims,  epochs = 100, 
+models_k <- params[, .(model = list(SVM(id ~ x + y, data = sims,  epochs = 300, 
                                         lambda = lambda,kernel = gauss_kernel(gamma)))), 
                    by = .(lambda, gamma)]
 

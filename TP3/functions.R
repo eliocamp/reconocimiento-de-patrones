@@ -52,33 +52,29 @@ pegasos <- function(X, y, batch = 1, lambda = 0.1, epochs = 100) {
 pegasos_kernel <- function(X, y, kernel = gauss_kern(1), 
                            batch = 1, lambda = 0.1, epochs = 100) {
   B <- rep(0, length = nrow(X))
-  for (e in seq_len(epochs)[-1]) {
-    if (interactive()) message(e)
-    converged <- FALSE
+  for (e in seq_len(epochs)) {
+    # if (interactive()) message(e)
     
-    for (i in seq_len(nrow(X))) {
-      example <- sample(nrow(X), batch)
-      
-      Xj <- X[example, , drop = FALSE]
-      
-      non_zero <- B != 0
-      
-      if (all(!non_zero)) {
-        K <- 0
-      } else {
-        K <- kernel(X[non_zero, , drop = FALSE], Xj)  
-      }
-      
-      
-      if (y[example, ]*1/(lambda*(e - 1))*sum(B[non_zero]*y[non_zero]*K) < 1) {
-        B[example] <- B[example] + 1
-        # converged <- FALSE
-      }
+    # for (i in seq_len(nrow(X))) {
+    example <- sample(nrow(X), batch)
+    
+    Xj <- X[example, , drop = FALSE]
+    yj <- y[example]
+    non_zero <- B != 0
+    
+    if (all(!non_zero)) {
+      K <- 0
+    } else {
+      K <- kernel(X[non_zero, , drop = FALSE], Xj)  
     }
     
-    if (converged) {
-      break
+    
+    if (yj*1/(lambda*e)*sum(B[non_zero]*y[non_zero]*K) < 1) {
+      B[example] <- B[example] + 1
     }
+    # }
+    
+    
     
   }
   
@@ -135,15 +131,33 @@ predict.svm_lineal <- function(object, newdata, ...) {
               lev = lev))
 }
 
+
 gauss_kernel <-  function(gamma) {
   force(gamma)
- 
+  
   function(X, Y) {
-    Y <- rray::rray_broadcast(Y, dim(X))
+
+    if (nrow(Y) != nrow(X)) {
+      Y <- matrix(Y, nrow = nrow(X),ncol = ncol(X), byrow = TRUE)  
+    }
+    
     Z <- X - Y
     
-    Z <- apply(Z, 1, function(x) sum(x^2))
+    Z <- rowSums(Z^2)
+
     exp(-gamma * Z)
+  }
+}
+
+
+euclidian_kernel <-  function() {
+  
+  function(X, Y) {
+    Y <- matrix(Y, ncol = ncol(X), nrow = nrow(X))
+    
+    Z <- vapply(seq_len(nrow(X)), function(i) X[i, , drop = FALSE] %*% t(Y[i, , drop = FALSE]),
+                numeric(1))
+    Z
   }
 }
 

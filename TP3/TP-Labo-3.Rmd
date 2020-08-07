@@ -75,7 +75,7 @@ fields <- models[, predict_field(model[[1]], x = c(-5, 5), y = c(-3, 3), n = 30)
 
 ggplot(mapping = aes(x, y)) +
   geom_contour_filled(aes(z = lev,  fill = sign(..level_mid..)),
-               data = fields, alpha = 0.4)  +
+                      data = fields, alpha = 0.4)  +
   geom_point(aes(color = id), size = 0.2,
              data = models[, data[[1]], by = .(lambda_e, delta_e)]) +
   metR::geom_contour2(data = fields, aes(z = lev), color = "black", breaks = 0) + 
@@ -93,21 +93,41 @@ Se ve que para datos muy separados el clasificador es poco sensible a la elecci�
 
 ## SVM con kernel gaussiano
 
-Luego, extiendo el algoritmo PEGASOS para poder usar un kernel arbitrario. En la Figura \ref{fig:svm-gauss} se muestran los resultados de applicar SVM con kernel gaussiano con distintos valores de $\gamma$ y $\lambda$ y un $\delta = 2$. 
+Luego, extiendo el algoritmo PEGASOS para poder usar un kernel arbitrario. En la Figura \ref{fig:svm-gauss} se muestran los resultados de applicar SVM con kernel gaussiano con distintos valores de $\gamma$ y $\lambda$ y un $\delta = 3.5$. 
+
+```{r cv}
+set.seed(42)
+deltas <- c(3.5)
+names(deltas) <- deltas
+sims <- generate_data(ns = c(150, 150), 
+                      mus = list(c(-deltas/2, 0), 
+                                 c(deltas/2, 0)),
+                      sigma= list(diag(1, 2), 
+                                  diag(1, 2)))
+
+lambdas <-  10^seq(-3, 2, by = 2)
+gammas <- 10^(seq(-3, 2, by = 1))
+params <- CJ(lambda = lambdas, 
+             gamma = gammas)
+
+
+models_k <- params[, .(model = list(SVM(id ~ x + y, data = sims,  epochs = 300, 
+                                        lambda = lambda,kernel = gauss_kernel(gamma)))), 
+                   by = .(lambda, gamma)]
+
+models_k[, lambda_e := factor(paste0("lambda == ", lambda))]
+models_k[, gamma_e := factor(paste0("gamma == ", gamma))]
+
+fields <- models_k[, predict_field(model[[1]], x = c(-5, 5), y = c(-3, 3), n = 40),
+                   by = .(lambda_e, gamma_e)]
+fields[, lev_r := lev/max(lev), by = .(lambda_e, gamma_e)] 
+```
 
 ```{r svm-gauss, fig.cap = "SVM con kernel gaussiano para distintos valores de $\\gamma$ y $\\lambda$. La separación entre los datos es $\\delta = 2$.", fig.height=6, fig.fullwidth = TRUE, fig.width=9}
-models_k <- readRDS(here::here("TP3", "models_r.Rds"))
-sims <- readRDS(here::here("TP3", "sims.Rds"))
-fields <- readRDS(here::here("TP3", "fields.Rds"))
-
-
-fields[, lev_r := lev/max(lev), by = .(lambda_e, gamma_e)] 
-
-
 ggplot(mapping = aes(x, y)) +
   
   geom_contour_filled(aes(z = lev_r,  fill = sign(..level_mid..)),
-               data = fields, alpha = 0.4)  +
+                      data = fields, alpha = 0.4)  +
   geom_point(aes(color = id), data = sims) +
   geom_contour(aes(z = lev), breaks = 0, color = "black",
                data = fields)  +
@@ -115,6 +135,7 @@ ggplot(mapping = aes(x, y)) +
   scale_fill_gradient2(low = "#1B9E77", high = "#D95F02", guide = "none") +
   facet_grid(lambda_e ~ gamma_e, labeller = label_parsed)
 ```
+
 
 Estos datos sintéticos son un poco aburridos. Voy a usar los datos que se muestran en la Figura 7.2 del Bishop (Figura \ref{fig:bishop2} derecha). Digitalicé los datos y los usé para entrenar una SVM con kernel gausiano con $\gamma = 0.5$ y $\lambda = 0.1$. El resultado se muestra en la Figura \ref{fig:bishop2} izquierda, que es muy similar. 
 
@@ -125,9 +146,9 @@ bishop <- fread(here::here("TP3", "bishiop7.2.csv")) %>%
   melt(id.vars = c("x"), value.name = "y", variable = "id") %>% 
   .[, id := forcats::fct_recode(id, "1" = "Curve1", "2" = "Curve2")] %>% 
   na.omit() 
-bishop_svm <- SVM(id ~ x + y, data = bishop, lambda = 0.1, epochs = 300,
+bishop_svm <- SVM(id ~ x + y, data = bishop, lambda = 0.001, epochs = 300,
                   kernel = gauss_kernel(0.5))
-
+# bishop_svm$a[bishop_svm$a == min(bishop_svm$a)] <- 0
 field <- predict_field(bishop_svm, bishop$x, bishop$y, 40)
 ```
 
@@ -149,7 +170,94 @@ p2 <- cowplot::ggdraw() +
 cowplot::plot_grid(p2, g, labels = c("Bishop (7.2)", "Fit"))
 ```
 
+
 ## Crossvalidation
+
+La Figura \ref{fig:cv-fig} muestra la tasa de acierto (proporción de observaciones correctamente categorizadas) computada por validación cruzada para distintos valores de $\lambda$ y $\gamma$. 
+
+```{r cv}
+lambdas <-  10^seq(-3, 2, by = 0.5)
+gammas <- 10^(seq(-2, 2, by = 0.5))
+params <- CJ(lambda = lambdas, 
+             gamma = gammas)
+
+N <- 50
+delta <- 3
+set.seed(42)
+datos <- generate_data(ns = c(N, N), 
+                     mus = list(c(-delta/2, 0), 
+                                c(delta/2, 0)),
+                     sigma= list(diag(1, 2), 
+                                 diag(1, 2)))
+
+rmse_cv <- function(datos, k_fold = 10, lambda, gamma, epochs = 100) {
+  N <- nrow(datos)
+  grupos <- ggplot2::cut_number(seq_len(N), k_fold)
+  
+  rmses <- vapply(seq_len(k_fold), function(k) {
+    train_index <- grupos != levels(grupos)[k] 
+    train <- datos[train_index == TRUE, ]
+    validation <- datos[train_index == FALSE, ]
+    
+    model <- SVM(id ~ x + y, data = train, epochs = epochs, 
+                 lambda = lambda,
+                 kernel = gauss_kernel(gamma))
+    validation$pred <- predict(model, validation)$pred
+    mean(validation$pred == validation$id)
+    
+  }, numeric(1))
+  return(mean(rmses))
+}
+
+reps <- 20
+positive <- lapply(seq_len(reps), function(i) params[, rmse_cv(datos, 10, lambda, gamma), by = .(lambda, gamma)]) %>% 
+  rbindlist()
+```
+
+```{r cv-fig, fig.cap = "Acierto computado a partir de validación cruzada para distintos valores de $\\lambda$ y $\\gamma$"}
+positive[, mean(V1), by = .(lambda, gamma)] %>% 
+  copy() %>% 
+  .[, c("dl", "dg") := metR::Derivate(V1 ~ log(lambda) + log(gamma), fill = TRUE)] %>% 
+  ggplot(aes(gamma, lambda)) +
+  metR::geom_contour_fill(aes(z = V1), bins = 20) +
+  metR::geom_streamline(aes(dx = dg, dy = dl), res = 3, n = 10,
+                        L = 20, alpha = 0.5,
+                        size = 0.05) +
+  geom_point(alpha = 0.5, size = 0.1) +
+  scale_y_continuous(latex2exp::TeX("$\\lambda"), trans = scales::log10_trans(),
+                     # breaks = unique(positive$lambda),
+                     expand = c(0.01, 0)) +
+  scale_x_continuous(latex2exp::TeX("$\\gamma$"),
+                     # breaks = unique(positive$gamma), 
+                     trans = scales::log10_trans(), 
+                     expand = c(0.01, 0)) +
+  scale_fill_viridis_c("Tasa de acierto")
+```
+Las mejores combinaciones)
+
+```{r}
+positive[V1 == max(V1)] %>% 
+  .[order(-lambda, gamma)]
+
+```
+
+```{r}
+
+
+model <- SVM(id ~ x + y, data = datos, lambda = best$lambda, kernel = gauss_kernel(best$gamma), epochs = 100)
+
+field <- predict_field(model, c(-5, 5), c(-3, 3))
+
+ggplot(mapping = aes(x, y)) +
+  geom_contour_filled(aes(z = lev,  fill = sign(..level_mid..)),
+                      data = field, alpha = 0.4)  +
+  geom_point(aes(color = id), data = datos) +
+  geom_contour(aes(z = lev), breaks = 0, color = "black",
+               data = field)  +
+  scale_color_brewer(palette = "Dark2", guide = "none") +
+  scale_fill_gradient2(low = "#1B9E77", high = "#D95F02", guide = "none") 
+```
+
 
 
 bablabl
