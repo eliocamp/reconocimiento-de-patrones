@@ -6,6 +6,7 @@ output:
     toc: no
     number_sections: no
 biblio-style: apalike-es
+
 ---
 
 ```{r setup, include = FALSE, tidy = FALSE}
@@ -22,7 +23,7 @@ theme_set(ggthemes::theme_tufte(base_size = 14) +
           
 )
 knitr::opts_chunk$set(tidy = FALSE, message = FALSE, warning = FALSE, tidy = FALSE,
-                      dev = "cairo_pdf",
+                      dev = "cairo_pdf", fig.pos = "h",
                       cache = TRUE, cache.extra = 42, echo = FALSE)
 
 label_null <- as_labeller(function(x) "")
@@ -36,7 +37,12 @@ set.seed(42)
 
 ## SVM con separación lineal
 
-Voy a implementar SVM usando soft-margin para datos sintéticos generados a partir de dos distribuciones normales bivariadas con $\Sigma^2=I$ y distintos grados de separación (\$\\delta \\in {1, 2, 4, 6}\$) en dirección x. La recta de separación óptima es una recta vertical centrada en cero.
+> 1. Implementar el algoritmo Pegausus y probarlo en datos sintéticos en $R^2$ con dos clases utilizando soft margin y separación lineal. Esta clases pueden ser generadas con distribución Gaussiana bivariada con covarianza isotrópica.
+
+> 2. Utilizando el algoritmo y los datos del punto anterior calcular el error de clasificación para distintos valores de C y graficar, para cada caso, la recta de separación del clasificador ($\mathbf{w}^t \mathbf{x} + x_0 = 0$), así como también las rectas correspondientes a $\mathbf{w}^t \mathbf{x} + x_0 = 1$ y a $\mathbf{w}^t \mathbf{x} + x_0 = -1$. Hacer esto para 3 diferentes grados de separación entre las dos clases.
+
+Voy a implementar SVM usando soft-margin para datos sintéticos generados a partir de dos distribuciones normales bivariadas con $\Sigma^2=I$ y distintos grados de separación ($\delta \in {1, 2, 4, 6}$) en dirección x. 
+La recta de separación óptima es una recta vertical centrada en cero.
 
 ```{r}
 deltas <- c(6, 4, 2, 1)
@@ -45,7 +51,7 @@ sims <- lapply(deltas, function(x) {
   generate_data(ns = c(150, 100), 
                 mus = list(c(-x/2, 0), 
                            c(x/2, 0)),
-                sigma= list(diag(1, 2), 
+                sigmas = list(diag(1, 2), 
                             diag(1, 2)))
 }) %>% 
   rbindlist(idcol = "delta") %>% 
@@ -63,36 +69,45 @@ models <- lapply(lambdas, function(l) {
   rbindlist(idcol = "lambda") %>% 
   .[, lambda := as.numeric(lambda)]
 
-models[, lambda_e := factor(paste0("lambda == ", lambda))]
+models[, lambda_e := factor(paste0("lambda == ", lambda), levels = paste0("lambda == ", lambdas), ordered = TRUE)]
 models[, delta_e := factor(paste0("delta == ", delta))]
 
 fields <- models[, predict_field(model[[1]], x = c(-5, 5), y = c(-3, 3), n = 30), 
                  by = .(lambda_e, delta_e)]
+
+
+error <- models[, c(as.list(data[[1]]), list(pred = predict(model[[1]], data[[1]])$pred)), by = .(lambda_e, delta_e)] %>% 
+  .[, .(error = mean(id != pred)), by = .(lambda_e, delta_e)]
+
 ```
 
 
-```{r deltas, fig.cap = "Límites de decisión para datos sintéticos con distintos grados de separación (columnas) y distinto nivel de tolerancia para datos mal clasificados (filas).", fig.height=3}
-
-
+```{r deltas, fig.cap = "Límites de decisión para datos sintéticos con distintos grados de separación (columnas) y distinto nivel de tolerancia para datos mal clasificados (filas). La línea negra es la recta de separación y las líneas grises son el márgen $\\mathbf{w}^t \\mathbf{x} + x_0 = \\pm1$. El error de clasificación (proporción de datos mal clasificados) se muestra an la esquina superior izquierda.", fig.height=5, fig.fullwidth = TRUE, fig.width=8}
 ggplot(mapping = aes(x, y)) +
   geom_contour_filled(aes(z = lev,  fill = sign(..level_mid..)),
                       data = fields, alpha = 0.4)  +
   geom_point(aes(color = id), size = 0.2,
              data = models[, data[[1]], by = .(lambda_e, delta_e)]) +
   metR::geom_contour2(data = fields, aes(z = lev), color = "black", breaks = 0) + 
+  metR::geom_contour2(data = fields, aes(z = lev), color = "gray50", breaks = c(-1, 1)) + 
+  
+  geom_text(data = error, aes(label = scales::number(error, accuracy = 0.01)), x = -Inf, y = Inf, size = 3.5, 
+            hjust = -0.2, vjust = 1.5) +
+  
   scale_color_brewer(palette = "Dark2", guide = "none") +
   scale_fill_gradient2(low = "#1B9E77", high = "#D95F02", guide = "none") +
-  scale_x_continuous(NULL) +
-  scale_y_continuous(NULL) +
+  scale_x_continuous(NULL, expand = c(0, 0)) +
+  scale_y_continuous(NULL, expand = c(0, 0)) +
   facet_grid(lambda_e ~ delta_e, 
              labeller = labeller(lambda_e = label_parsed, delta_e = label_parsed)) 
 ```
 
 En la Figura \ref{fig:deltas} se muestra el límite de decisión para los cuatro set se datos (columnas) y los grados de soft-margin donde un $\lambda$ pequeño equivale a poca tolerancia mientras que un lambda grande equivale a mucha tolerancia.
 
-Se ve que para datos muy separados el clasificador es poco sensible a la elección de hiperparámetro $\lambda$. Para datos poco separables  la elección de \$\\lambda\$ tiene gran impacto en el resultado.
 
 ## SVM con kernel gaussiano
+
+> 3.  Disenãr un generador de datos no separables y utilizar el kernel $K(\mathbf{x}, \mathbf{x'}) = \exp(-\gamma ||\mathbf{x} - \mathbf{x'} ||)$ para separar un set de datos producido por este generador.
 
 Luego, extiendo el algoritmo PEGASOS para poder usar un kernel arbitrario. En la Figura \ref{fig:svm-gauss} se muestran los resultados de applicar SVM con kernel gaussiano con distintos valores de $\gamma$ y $\lambda$ y un $\delta = 3.5$. 
 
@@ -103,7 +118,7 @@ names(deltas) <- deltas
 sims <- generate_data(ns = c(150, 150), 
                       mus = list(c(-deltas/2, 0), 
                                  c(deltas/2, 0)),
-                      sigma= list(diag(1, 2), 
+                      sigmas= list(diag(1, 2), 
                                   diag(1, 2)))
 
 lambdas <-  10^seq(-3, 2, by = 2)
@@ -116,7 +131,7 @@ models_k <- params[, .(model = list(SVM(id ~ x + y, data = sims,  epochs = 300,
                                         lambda = lambda,kernel = gauss_kernel(gamma)))), 
                    by = .(lambda, gamma)]
 
-models_k[, lambda_e := factor(paste0("lambda == ", lambda))]
+models_k[, lambda_e := factor(paste0("lambda == ", lambda), levels = paste0("lambda == ", rev(lambdas)))]
 models_k[, gamma_e := factor(paste0("gamma == ", gamma))]
 
 fields <- models_k[, predict_field(model[[1]], x = c(-5, 5), y = c(-3, 3), n = 40),
@@ -126,7 +141,6 @@ fields[, lev_r := lev/max(lev), by = .(lambda_e, gamma_e)]
 
 ```{r svm-gauss, fig.cap = "SVM con kernel gaussiano para distintos valores de $\\gamma$ y $\\lambda$. La separación entre los datos es $\\delta = 2$.", fig.height=6, fig.fullwidth = TRUE, fig.width=9}
 ggplot(mapping = aes(x, y)) +
-  
   geom_contour_filled(aes(z = lev_r,  fill = sign(..level_mid..)),
                       data = fields, alpha = 0.4)  +
   geom_point(aes(color = id), data = sims) +
@@ -135,6 +149,7 @@ ggplot(mapping = aes(x, y)) +
   scale_color_brewer(palette = "Dark2", guide = "none") +
   scale_fill_gradient2(low = "#1B9E77", high = "#D95F02", guide = "none") +
   facet_grid(lambda_e ~ gamma_e, labeller = label_parsed)
+
 ```
 
 
@@ -153,8 +168,7 @@ bishop_svm <- SVM(id ~ x + y, data = bishop, lambda = 0.001, epochs = 300,
 field <- predict_field(bishop_svm, bishop$x, bishop$y, 40)
 ```
 
-```{r bishop2, fig.cap = "SVM con kernel gaussiano para los datos de la Figura 7.2 del Bishop. y(x) en líneas de contorno, y(x) = 0 en línea gruesa.A la derecha, la figura original, a la izquierda, el clasificador entrenado en este ejercicio", fig.height=4, fig.width=9, fig.fullwidth = TRUE, dependson=field}
-
+```{r bishop2, fig.cap = "SVM con kernel gaussiano para los datos de la Figura 7.2 del Bishop. y(x) en líneas de contorno, y(x) = 0 en línea gruesa. A la derecha, la figura original, a la izquierda, el clasificador entrenado en este ejercicio", fig.height = 3, fig.width = 9, fig.fullwidth = TRUE}
 g <- ggplot(bishop, aes(x, y)) +
   geom_contour(data = field, aes(z = lev), color = "black", size = 0.1) +
   geom_contour(data = field, aes(z = lev), color = "black", breaks = 0) +
@@ -171,9 +185,9 @@ p2 <- cowplot::ggdraw() +
 cowplot::plot_grid(p2, g, labels = c("Bishop (7.2)", "Fit"))
 ```
 
+## Validación cruzada
 
-## Crossvalidation
-
+> 4. Utilizando el mismo generador de datos del item anterior, determinar la mejor combinación de valores $(C, \gamma)$ mediante cross-validation.
 
 ```{r cv}
 lambdas <-  10^seq(-3, 2, by = 0.5)
@@ -187,7 +201,7 @@ set.seed(42)
 datos <- generate_data(ns = c(N, N), 
                      mus = list(c(-delta/2, 0), 
                                 c(delta/2, 0)),
-                     sigma= list(diag(1, 2), 
+                     sigmas = list(diag(1, 2), 
                                  diag(1, 2)))
 
 rmse_cv <- function(datos, k_fold = 10, lambda, gamma, epochs = 100) {
@@ -216,15 +230,24 @@ positive <- lapply(seq_len(reps), function(i) params[, rmse_cv(datos, 10, lambda
 best <- positive[V1 == max(V1)]
 ```
 
-```{r cv-fig, fig.cap = "Acierto computado a partir de validación cruzada para distintos valores de $\\lambda$ y $\\gamma$", fig.height=4}
+```{r}
+model <- SVM(id ~ x + y, data = datos, lambda = best$lambda, kernel = gauss_kernel(best$gamma), epochs = 100)
+
+field <- predict_field(model, c(-5, 5), c(-3, 3))
+```
+
+El panel izqueirdo de la Figura \ref{fig:cv-fig} muestra la tasa de acierto (proporción de observaciones correctamente categorizadas) computada por validación cruzada para distintos valores de $\lambda$ y $\gamma$. La mejor combinación de hiperparámetros está marcada con un punto. En el panel derecho se muestra el límite de decisión para la SVM ajustada con éstos. 
+
+
+```{r cv-fig, fig.cap = "Acierto computado a partir de validación cruzada para distintos valores de $\\lambda$ y $\\gamma$ y SVM fiteada con los mejores valores de $\\lambda$ y $\\gamma$ elegidos por validación cruzada.", fig.height=5, fig.width=8, fig.fulwidth = TRUE}
 positive %>% 
   copy() %>% 
   .[, c("dl", "dg") := metR::Derivate(V1 ~ log(lambda) + log(gamma), fill = TRUE)] %>% 
   ggplot(aes(gamma, lambda)) +
   metR::geom_contour_fill(aes(z = V1), bins = 20) +
-  metR::geom_streamline(aes(dx = dg, dy = dl), res = 3, n = 10,
-                        L = 30, alpha = 0.5,
-                        size = 0.05) +
+  # metR::geom_streamline(aes(dx = dg, dy = dl), res = 3, n = 10,
+  #                       L = 30, alpha = 0.5,
+  #                       size = 0.05) +
   geom_point(alpha = 0.5, size = 0.1) +
   geom_point(data = best, size = 1) +
   ggrepel::geom_text_repel(data = best, parse = TRUE, bg.colour = "#DFE234", bg.r = 0.2,
@@ -239,16 +262,9 @@ positive %>%
                      trans = scales::log10_trans(), 
                      expand = c(0.01, 0)) +
   scale_fill_viridis_c("Tasa de acierto") +
-  theme(legend.position = "bottom")
-
-```
-La Figura \ref{fig:cv-fig} muestra la tasa de acierto (proporción de observaciones correctamente categorizadas) computada por validación cruzada para distintos valores de $\lambda$ y $\gamma$. La mejor combinación de hiperparámetros está marcada con un punto. En la Figura \ref{fig:field-best} se muestra el límite de decisión para la SVM ajustada con éstos. 
-
-```{r field-best, fig.cap = "SVM fiteada con los mejores valores de $\\lambda$ y $\\gamma$ elegidos por validación cruzada."}
-model <- SVM(id ~ x + y, data = datos, lambda = best$lambda, kernel = gauss_kernel(best$gamma), epochs = 100)
-
-field <- predict_field(model, c(-5, 5), c(-3, 3))
-
+  theme(legend.position = "bottom")  +
+  
+  
 ggplot(mapping = aes(x, y)) +
   geom_contour_filled(aes(z = lev,  fill = sign(..level_mid..)),
                       data = field, alpha = 0.4)  +
@@ -258,5 +274,8 @@ ggplot(mapping = aes(x, y)) +
                data = field)  +
   scale_color_brewer(palette = "Dark2", guide = "none") +
   scale_fill_gradient2(low = "#1B9E77", high = "#D95F02", guide = "none") 
+
 ```
 
+
+  
